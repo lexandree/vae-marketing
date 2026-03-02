@@ -31,8 +31,22 @@ src/
 
 ## Getting started
 
-1. Install dependencies (see `environment.yml` or `pyproject.toml`).
-2. Place Dunnhumby CSVs in `data/` or adapt `src/data/dataset.py` accordingly.
-3. Run unit tests with `cd src && pytest`.
+1. Create and activate the `ds` conda environment:
+   ```bash
+   conda env create -f environment.yml  # or manually install packages
+   conda activate ds
+   ```
+2. Place Dunnhumby CSVs in `data/` or adapt `src/data/dataset.py` accordingly. Data files are intentionally **not** tracked (see `.gitignore`).
+3. Run the unit test suite from the repository root. The `src` package must be importable; you can either install it in editable mode or set `PYTHONPATH`:
+   ```bash
+   # option A: install package locally
+   pip install -e src
+   pytest
+
+   # option B: export PYTHONPATH
+   export PYTHONPATH="$PWD/src"
+   pytest
+   ```
+   This ensures `import src` works and avoids ``ModuleNotFoundError``.
 
 This document serves as a high-level introduction; further instructions exist in `specs/001-consumer-behavior-impact/quickstart.md` once implemented.
