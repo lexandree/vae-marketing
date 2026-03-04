@@ -3,6 +3,8 @@
 Auto-generated from all feature plans. Last updated: 2026-02-25
 
 ## Active Technologies
+- Python 3.11+ + Polars (for fast processing of up to 1TB data), Pandas, Scikit-learn, PyArrow (for Parquet) (002-data-preparation)
+- Parquet files on local filesystem (002-data-preparation)
 
 - Python 3.11+ + PyTorch, Pandas, Polars, Scikit-learn, Plotly, Seaborn (001-consumer-behavior-impact)
 
@@ -22,6 +24,7 @@ cd src && pytest && ruff check .
 Python 3.11+: Follow standard conventions
 
 ## Recent Changes
+- 002-data-preparation: Added Python 3.11+ + Polars (for fast processing of up to 1TB data), Pandas, Scikit-learn, PyArrow (for Parquet)
 
 - 001-consumer-behavior-impact: Added Python 3.11+ + PyTorch, Pandas, Polars, Scikit-learn, Plotly, Seaborn
 

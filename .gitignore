@@ -50,6 +50,6 @@ data/
 *~
 
 # Work-in-progress stages
-specs/002-data-preparation/
+
 specs/003-disentanglement/
 
