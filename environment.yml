@@ -7,6 +7,8 @@ dependencies:
   - pip
   - pandas
   - polars
+  - pyarrow
+  - fastparquet
   - scikit-learn
   - plotly
   - seaborn
