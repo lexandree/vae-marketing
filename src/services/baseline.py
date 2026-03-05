@@ -25,43 +25,29 @@ def train_baseline_vae(
     epochs: int = 50, 
     batch_size: int = 64,
     learning_rate: float = 1e-3,
-    min_transactions: int = 5
 ) -> nn.Module:
     """Trains the VAE on historical purchase data without stimuli.
     
-    Note: Optimization ensures this operates quickly on single household baseline 
-    training to meet the < 5s requirement.
-    
     Args:
         data: DataFrame containing transactions (needs to be grouped/aggregated per household).
-        model: The VAE model.        epochs: Number of training epochs.
+        model: The VAE model.
+        epochs: Number of training epochs.
         batch_size: Batch size for DataLoader.
         learning_rate: Optimizer learning rate.
-        min_transactions: Minimum transactions required for a household to be included.
 
     Returns:
         The trained VAE model.
     """
-    # Validation: Filter out households with insufficient data
-    household_counts = data['household_id'].value_counts()
-    valid_households = household_counts[household_counts >= min_transactions].index
+    logger.info(f"Training on {len(data)} windows.")
 
-    if len(valid_households) == 0:
-        logger.error("No households meet the minimum transaction threshold.")
-        raise ValueError("Insufficient historical data for all households to train baseline.")
-
-    filtered_data = data[data['household_id'].isin(valid_households)]
-    logger.info(f"Training on {len(valid_households)} valid households.")
-
-    # Preprocessing (Assume data is already aggregated to categories and temporal features per row)
-    category_cols = [c for c in filtered_data.columns if c.startswith('cat_')]
-    temporal_cols = ['month_of_year', 'week_of_year']
+    category_cols = [c for c in data.columns if c.endswith('_SPEND') or c.endswith('_QTY')]
+    temporal_cols = [c for c in data.columns if c.startswith('TEMPORAL_')]
 
     if not category_cols:
-        raise ValueError("No category columns found (expected prefix 'cat_').")
+        raise ValueError("No category columns found (expected suffix '_SPEND' or '_QTY').")
 
-    x_tensor = torch.tensor(filtered_data[category_cols].values, dtype=torch.float32)
-    t_tensor = torch.tensor(filtered_data[temporal_cols].values, dtype=torch.float32)
+    x_tensor = torch.tensor(data[category_cols].values, dtype=torch.float32)
+    t_tensor = torch.tensor(data[temporal_cols].values, dtype=torch.float32)
 
     dataset = TensorDataset(x_tensor, t_tensor)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
@@ -88,8 +74,8 @@ def get_household_profile(model: nn.Module, household_data: pd.DataFrame) -> np.
     """Returns the latent representation (mu vector) for a given household."""
     model.eval()
 
-    category_cols = [c for c in household_data.columns if c.startswith('cat_')]
-    temporal_cols = ['month_of_year', 'week_of_year']
+    category_cols = [c for c in household_data.columns if c.endswith('_SPEND') or c.endswith('_QTY')]
+    temporal_cols = [c for c in household_data.columns if c.startswith('TEMPORAL_')]
 
     if not category_cols or not temporal_cols:
         raise ValueError("Household data missing required category or temporal columns.")

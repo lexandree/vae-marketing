@@ -31,22 +31,12 @@ src/
 
 ## Getting started
 
-1. Create and activate the `ds` conda environment:
-   ```bash
-   conda env create -f environment.yml  # or manually install packages
-   conda activate ds
-   ```
-2. Place Dunnhumby CSVs in `data/` or adapt `src/data/dataset.py` accordingly. Data files are intentionally **not** tracked (see `.gitignore`).
-3. Run the unit test suite from the repository root. The `src` package must be importable; you can either install it in editable mode or set `PYTHONPATH`:
-   ```bash
-   # option A: install package locally
-   pip install -e src
-   pytest
+For a complete step-by-step guide on data preparation, model training, and running the impact analysis report, please refer to the **[Quickstart Guide](specs/002-data-preparation/quickstart.md)**.
 
-   # option B: export PYTHONPATH
-   export PYTHONPATH="$PWD/src"
-   pytest
-   ```
-   This ensures `import src` works and avoids ``ModuleNotFoundError``.
+### High-level workflow:
 
-This document serves as a high-level introduction; further instructions exist in `specs/001-consumer-behavior-impact/quickstart.md` once implemented.
+1. **Prepare Data**: Run `src.data.prepare` to transform raw CSVs into Parquet.
+2. **Train Model**: Run `main.py train` to establish a behavioral baseline.
+3. **Analyze Impact**: Run `main.py infer` to detect deviations in consumer behavior.
+
+This document serves as a high-level introduction; further instructions exist in `specs/002-data-preparation/quickstart.md`.

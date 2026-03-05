@@ -9,9 +9,9 @@
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 Create missing directories and basic files in `src/data/` and `tests/` based on plan structure
-- [ ] T002 Add required libraries (polars, pyarrow, scikit-learn) to project dependencies
-- [ ] T003 [P] Setup logging and error handling boilerplate in `src/data/prepare.py`
+- [x] T001 Create missing directories and basic files in `src/data/` and `tests/` based on plan structure
+- [x] T002 Add required libraries (polars, pyarrow, scikit-learn) to project dependencies
+- [x] T003 [P] Setup logging and error handling boilerplate in `src/data/prepare.py`
 
 ---
 
@@ -21,10 +21,10 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T000 [P] Initialize deterministic global random seeds (numpy, torch, python) in `src/utils/seed.py`
-- [ ] T004 Define schemas and data structures for raw transactions and product hierarchy
-- [ ] T005 Implement CLI argument parsing structure in `src/data/prepare.py` based on `pipeline_api.md` contract
-- [ ] T005.1 Implement strict Polars input schema validation (check dtypes for sales and IDs) before processing in `src/data/prepare.py`
+- [x] T000 [P] Initialize deterministic global random seeds (numpy, torch, python) in `src/utils/seed.py`
+- [x] T004 Define schemas and data structures for raw transactions and product hierarchy
+- [x] T005 Implement CLI argument parsing structure in `src/data/prepare.py` based on `pipeline_api.md` contract
+- [x] T005.1 Implement strict Polars input schema validation (check dtypes for sales and IDs) before processing in `src/data/prepare.py`
 
 **Checkpoint**: Foundation ready - user story implementation can now begin
 
@@ -38,15 +38,15 @@
 
 ### Tests for User Story 1
 
-- [ ] T006 [P] [US1] Write unit tests for hierarchical mapping and temporal encoding logic in `tests/unit/test_data_prep.py`
-- [ ] T007 [P] [US1] Write unit tests for 7-day rolling window aggregation in `tests/unit/test_data_prep.py`
+- [x] T006 [P] [US1] Write unit tests for hierarchical mapping and temporal encoding logic in `tests/unit/test_data_prep.py`
+- [x] T007 [P] [US1] Write unit tests for 7-day rolling window aggregation in `tests/unit/test_data_prep.py`
 
 ### Implementation for User Story 1
 
-- [ ] T008 [P] [US1] Implement hierarchical product features mapping (COMMODITY -> SUB_COMMODITY) in `src/data/extractors.py`
-- [ ] T009 [P] [US1] Implement cyclical continuous encoding (sine/cosine) for temporal features (week/month/day) in `src/data/extractors.py`
-- [ ] T010 [US1] Implement 7-day rolling window aggregation (imputing temporary gaps as zero-vectors and filtering zero-history households) in `src/data/extractors.py`
-- [ ] T011 [US1] Implement filtering of non-purchase transactions (returns/refunds/coupons) in `src/data/extractors.py`
+- [x] T008 [P] [US1] Implement hierarchical product features mapping (COMMODITY -> SUB_COMMODITY) in `src/data/extractors.py`
+- [x] T009 [P] [US1] Implement cyclical continuous encoding (sine/cosine) for temporal features (week/month/day) in `src/data/extractors.py`
+- [x] T010 [US1] Implement 7-day rolling window aggregation (imputing temporary gaps as zero-vectors and filtering zero-history households) in `src/data/extractors.py`
+- [x] T011 [US1] Implement filtering of non-purchase transactions (returns/refunds/coupons) in `src/data/extractors.py`
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -60,14 +60,14 @@
 
 ### Tests for User Story 2
 
-- [ ] T012 [P] [US2] Write unit tests for log-scale/z-score normalization in `tests/unit/test_data_prep.py`
-- [ ] T013 [P] [US2] Write unit tests for forward-chaining time-series splits in `tests/unit/test_data_prep.py`
+- [x] T012 [P] [US2] Write unit tests for log-scale/z-score normalization in `tests/unit/test_data_prep.py`
+- [x] T013 [P] [US2] Write unit tests for forward-chaining time-series splits in `tests/unit/test_data_prep.py`
 
 ### Implementation for User Story 2
 
-- [ ] T014 [P] [US2] Implement log-scale/Box-Cox transformation and z-score scaling per cohort in `src/data/normalizers.py`
-- [ ] T015 [P] [US2] Implement forward-chaining time-series data split logic in `src/data/normalizers.py`
-- [ ] T016 [US2] Implement parameter saving/loading for normalizer metrics (`scaler_params.json`) in `src/data/normalizers.py`
+- [x] T014 [P] [US2] Implement log-scale/Box-Cox transformation and z-score scaling per cohort in `src/data/normalizers.py`
+- [x] T015 [P] [US2] Implement forward-chaining time-series data split logic in `src/data/normalizers.py`
+- [x] T016 [US2] Implement parameter saving/loading for normalizer metrics (`scaler_params.json`) in `src/data/normalizers.py`
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
@@ -77,10 +77,10 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T017 Integrate extractors and normalizers into the main CLI execution flow in `src/data/prepare.py`
-- [ ] T018 Implement output saving to Parquet format (`train.parquet`, `val.parquet`, `test.parquet`) in `src/data/prepare.py`
-- [ ] T019 Write end-to-end integration test in `tests/integration/test_pipeline_end_to_end.py`
-- [ ] T020 Run quickstart.md validation locally to verify the pipeline executes correctly
+- [x] T017 Integrate extractors and normalizers into the main CLI execution flow in `src/data/prepare.py`
+- [x] T018 Implement output saving to Parquet format (`train.parquet`, `val.parquet`, `test.parquet`) in `src/data/prepare.py`
+- [x] T019 Write end-to-end integration test in `tests/integration/test_pipeline_end_to_end.py`
+- [x] T020 Run quickstart.md validation locally to verify the pipeline executes correctly
 
 ---
 

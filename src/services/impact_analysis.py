@@ -1,4 +1,3 @@
-
 import numpy as np
 import pandas as pd
 import torch
@@ -18,10 +17,10 @@ def calculate_deviation(baseline_profile: np.ndarray, post_stimulus_data: pd.Dat
     """
     model.eval()
 
-    category_cols = [c for c in post_stimulus_data.columns if c.startswith('cat_')]
-    temporal_cols = ['month_of_year', 'week_of_year']
+    category_cols = [c for c in post_stimulus_data.columns if c.endswith('_SPEND') or c.endswith('_QTY')]
+    temporal_cols = [c for c in post_stimulus_data.columns if c.startswith('TEMPORAL_')]
 
-    if not category_cols or not temporal_cols or not all(col in post_stimulus_data.columns for col in temporal_cols):
+    if not category_cols or not temporal_cols:
         raise ValueError("Post-stimulus data missing required columns (categories or temporal).")
 
     x_tensor = torch.tensor(post_stimulus_data[category_cols].values, dtype=torch.float32)
@@ -46,29 +45,16 @@ def categorize_shift(baseline_data: pd.DataFrame, post_stimulus_data: pd.DataFra
     Returns:
         A string representing the category of shift (e.g., 'Trading Up', 'Stockpiling', 'No Change').
     """
-    if 'price_tier' not in baseline_data.columns or 'quantity' not in baseline_data.columns:
-        # Fallback or need these columns for the heuristic
-        return 'Unknown'
+    # TODO: Update this logic to use the new COMMODITY_*_SPEND/QTY features in Phase 3/4.
+    # For now, return a placeholder based on simple magnitude heuristics or 'Unknown'
+    return 'Unknown (Pending Phase 3/4)'
 
-    base_price = baseline_data['price_tier'].mean()
-    base_qty = baseline_data['quantity'].mean()
-
-    post_price = post_stimulus_data['price_tier'].mean()
-    post_qty = post_stimulus_data['quantity'].mean()
-
-    if post_price > base_price * 1.5:
-        return 'Trading Up'
-    elif post_qty > base_qty * 2.0:
-        return 'Stockpiling'
-    else:
-        return 'No Change'
-
-def analyze_persistence(household_data: pd.DataFrame, stimulus_end: pd.Timestamp, model: nn.Module, baseline_profile: np.ndarray, threshold: float = 0.5) -> int:
+def analyze_persistence(household_data: pd.DataFrame, stimulus_end_day: int, model: nn.Module, baseline_profile: np.ndarray, threshold: float = 0.5) -> int:
     """Returns the number of days until the household behavior returns to the baseline.
 
     Args:
         household_data: DataFrame of household transactions after the stimulus.
-        stimulus_end: Timestamp of when the stimulus ended.
+        stimulus_end_day: Day index of when the stimulus ended.
         model: The trained VAE model.
         baseline_profile: The baseline latent representation.
         threshold: The distance threshold to consider behavior "returned to normal".
@@ -76,27 +62,23 @@ def analyze_persistence(household_data: pd.DataFrame, stimulus_end: pd.Timestamp
     Returns:
         Number of days for persistence.
     """
+    if 'WINDOW_START_DAY' not in household_data.columns:
+        return 0
+
     # Sort data chronologically
-    df = household_data.sort_values('timestamp')
+    df = household_data.sort_values('WINDOW_START_DAY')
 
-    # Analyze in windows (e.g., weekly)
-    # For simplicity, calculate distance row by row or rolling window.
-    # We will compute distance sequentially until it drops below threshold.
-
-    # We need to compute deviation for subsets.
-    # Group by week or use individual rows. Let's process row by row for the example.
     for _i, (_, row) in enumerate(df.iterrows()):
         row_df = pd.DataFrame([row])
-        # Try to calculate distance if required cols exist
         try:
             dist = calculate_deviation(baseline_profile, row_df, model)
             if dist < threshold:
-                return (row['timestamp'] - stimulus_end).days
+                return int(row['WINDOW_START_DAY'] - stimulus_end_day)
         except ValueError:
             continue
 
-    # If it never returns below threshold in the provided data
     if not df.empty:
-        return (df.iloc[-1]['timestamp'] - stimulus_end).days
+        return int(df.iloc[-1]['WINDOW_START_DAY'] - stimulus_end_day)
 
     return 0
+

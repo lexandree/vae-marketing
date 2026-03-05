@@ -43,17 +43,18 @@ def rank_sensitive_categories(shifts: pd.DataFrame, transactions: pd.DataFrame, 
     # Simplified heuristic: Group transactions by household, merge with shift magnitude,
     # and aggregate magnitude by category. A more rigorous approach would isolate
     # the exact deviation per category.
-    merged = transactions.merge(shifts[['household_id', 'quantitative_magnitude']], on='household_id', how='inner')
+    # Updated column names to use HOUSEHOLD_KEY instead of household_id
+    merged = transactions.merge(shifts[['household_id', 'quantitative_magnitude']], left_on='HOUSEHOLD_KEY', right_on='household_id', how='inner')
 
-    # Check if 'product_category' exists, if not, try to unpivot 'cat_' columns for the heuristic
+    # Check if 'product_category' exists, if not, try to unpivot 'COMMODITY_' columns for the heuristic
     if 'product_category' not in merged.columns:
-        cat_cols = [c for c in merged.columns if c.startswith('cat_')]
+        cat_cols = [c for c in merged.columns if c.startswith('COMMODITY_') and c.endswith('_SPEND')]
         if not cat_cols:
             return pd.DataFrame(columns=['product_category', 'sensitivity_score'])
 
         # Melt the dataframe to have a 'product_category' column
         merged = merged.melt(id_vars=['household_id', 'quantitative_magnitude'], value_vars=cat_cols, var_name='product_category', value_name='value')
-        # Only consider categories where the user actually bought something (>0)
+        # Only consider categories where the user actually bought something (>0 or > threshold)
         merged = merged[merged['value'] > 0]
 
     # Score = sum of shift magnitudes for households that bought the category
