@@ -1,4 +1,4 @@
-name: vae-marketing-gpu-optimized
+name: vae-marketing-fast-hpo
 project: vae_marketing
 program: main.py
 method: random
@@ -31,4 +31,6 @@ command:
   - "--vocab"
   - "data/processed_full/vocabulary.json"
   - "--wandb"
+  - "--verbosity"
+  - "0" # Делаем свип максимально тихим
   - ${args}
