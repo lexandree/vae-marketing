@@ -50,10 +50,7 @@ def run_training_loop(
             current_beta = model.get_beta(epoch, args.anneal_end, args.beta)
 
         for batch_x, batch_t in dataloader:
-            # Move data to GPU
-            batch_x = batch_x.to(device)
-            batch_t = batch_t.to(device)
-
+            # Data is already on GPU if we pre-loaded it
             optimizer.zero_grad()
             recon_x, mu, logvar = model(batch_x, batch_t)
 
@@ -98,7 +95,7 @@ def run_training_loop(
 
 def train_command(args: argparse.Namespace) -> None:
     """Train the VAE model (Baseline or Beta)."""
-    logger.info(f"Loading training data on {device}...")
+    logger.info(f"Loading training data from {args.data}")
     train_df = pd.read_parquet(args.data)
 
     with open(args.vocab, 'r') as f:
@@ -129,19 +126,15 @@ def train_command(args: argparse.Namespace) -> None:
     model = ModelFactory.create_model(config).to(device)
     ModelFactory.save_config(config, run_dir)
 
-    x_tensor = torch.tensor(train_df[category_cols].values, dtype=torch.float32)
-    t_tensor = torch.tensor(train_df[temporal_cols].values, dtype=torch.float32)
+    # ULTIMATE OPTIMIZATION: Move entire dataset to GPU once
+    logger.info(f"Transferring entire dataset to {device} memory...")
+    x_tensor = torch.tensor(train_df[category_cols].values, dtype=torch.float32).to(device)
+    t_tensor = torch.tensor(train_df[temporal_cols].values, dtype=torch.float32).to(device)
     
-    # Calculate optimal number of workers (Colab usually has 2-4 cores)
-    import os
-    num_workers = min(os.cpu_count(), 4) if device.type == "cuda" else 0
-
     dataloader = DataLoader(
         TensorDataset(x_tensor, t_tensor), 
         batch_size=config["batch_size"], 
-        shuffle=True,
-        pin_memory=True if torch.cuda.is_available() else False,
-        num_workers=num_workers
+        shuffle=True
     )
 
     best_loss, last_kl = run_training_loop(model, dataloader, config, run_dir, args)
@@ -198,7 +191,6 @@ def infer_command(args: argparse.Namespace) -> None:
 
     for h_id in valid_households:
         h_base = base_df[base_df["HOUSEHOLD_KEY"] == h_id]
-        # Baseline profile logic needs device awareness too
         base_prof = get_household_profile(model, h_base)
         baseline_profiles[h_id] = base_prof
 
