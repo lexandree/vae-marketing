@@ -1,25 +1,27 @@
-name: vae-marketing-fast-hpo
+name: vae-marketing-finetuning
 project: vae_marketing
 program: main.py
-method: random
+method: bayes # Используем байесовский поиск для более точной настройки
 metric:
   name: loss
   goal: minimize
 parameters:
   latent-dim:
-    values: [32, 64, 128]
+    values: [64, 128, 256] # Проверим, поможет ли еще большее пространство
   beta:
-    distribution: log_uniform_values
+    distribution: uniform
     min: 0.0001
-    max: 0.5
+    max: 0.0008 # Сфокусировались на лучшем диапазоне
   batch-size:
-    values: [1024, 2048, 4096]
+    value: 1024 # Зафиксировали лучший результат
   lr:
-    distribution: log_uniform_values
-    min: 1e-4
-    max: 5e-3
+    distribution: uniform
+    min: 0.001
+    max: 0.003
   epochs:
-    value: 20
+    value: 30 # Увеличили для более точной оценки
+  anneal-end:
+    values: [5, 10, 15]
   arch:
     value: "beta_vae"
 command:
@@ -32,5 +34,5 @@ command:
   - "data/processed_full/vocabulary.json"
   - "--wandb"
   - "--verbosity"
-  - "0" # Делаем свип максимально тихим
+  - "0"
   - ${args}
