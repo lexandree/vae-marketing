@@ -110,7 +110,7 @@ def train_command(args: argparse.Namespace) -> None:
         "run_id": run_id, "arch": args.arch, "latent_dim": args.latent_dim,
         "beta": args.beta, "anneal_epochs": args.anneal_end, "use_gkl": args.gkl,
         "num_categories": num_categories, "num_temporal_features": len(temporal_cols),
-        "epochs": args.epochs, "batch_size": 64, "learning_rate": args.lr,
+        "epochs": args.epochs, "batch_size": args.batch_size, "learning_rate": args.lr,
         "vocabulary_path": str(args.vocab),
         "train_data_path": str(args.data)
     }
@@ -257,6 +257,7 @@ def main() -> None:
     train_parser.add_argument("--anneal-end", type=int, default=0)
     train_parser.add_argument("--latent-dim", type=int, default=16)
     train_parser.add_argument("--epochs", type=int, default=20)
+    train_parser.add_argument("--batch-size", type=int, default=64)
     train_parser.add_argument("--lr", type=float, default=1e-3)
     train_parser.add_argument("--wandb", action="store_true")
     train_parser.add_argument("--gkl", action="store_true")
