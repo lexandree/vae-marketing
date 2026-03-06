@@ -132,7 +132,10 @@ def train_command(args: argparse.Namespace) -> None:
     x_tensor = torch.tensor(train_df[category_cols].values, dtype=torch.float32)
     t_tensor = torch.tensor(train_df[temporal_cols].values, dtype=torch.float32)
     dataloader = DataLoader(
-        TensorDataset(x_tensor, t_tensor), batch_size=config["batch_size"], shuffle=True
+        TensorDataset(x_tensor, t_tensor), 
+        batch_size=config["batch_size"], 
+        shuffle=True,
+        pin_memory=True if torch.cuda.is_available() else False
     )
 
     best_loss, last_kl = run_training_loop(model, dataloader, config, run_dir, args)
