@@ -131,11 +131,17 @@ def train_command(args: argparse.Namespace) -> None:
 
     x_tensor = torch.tensor(train_df[category_cols].values, dtype=torch.float32)
     t_tensor = torch.tensor(train_df[temporal_cols].values, dtype=torch.float32)
+    
+    # Calculate optimal number of workers (Colab usually has 2-4 cores)
+    import os
+    num_workers = min(os.cpu_count(), 4) if device.type == "cuda" else 0
+
     dataloader = DataLoader(
         TensorDataset(x_tensor, t_tensor), 
         batch_size=config["batch_size"], 
         shuffle=True,
-        pin_memory=True if torch.cuda.is_available() else False
+        pin_memory=True if torch.cuda.is_available() else False,
+        num_workers=num_workers
     )
 
     best_loss, last_kl = run_training_loop(model, dataloader, config, run_dir, args)
