@@ -1,6 +1,7 @@
 name: vae-marketing-hpo
 project: vae_marketing
-method: random # Случайный поиск эффективнее сетки для многих параметров
+program: main.py
+method: random
 metric:
   name: loss
   goal: minimize
