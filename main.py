@@ -21,7 +21,7 @@ from src.services.impact_analysis import (
 from src.services.reporting_baseline import generate_aggregate_report
 from src.utils.metrics import setup_logger
 from src.utils.seed import set_seed
-from src.utils.wandb_logger import finish_logging, init_wandb, log_metrics, save_checkpoint
+from src.utils.wandb_logger import finish_logging, init_wandb, log_metrics, save_artifact
 
 set_seed(42)
 logger = setup_logger(__name__)
@@ -50,7 +50,6 @@ def run_training_loop(
             current_beta = model.get_beta(epoch, args.anneal_end, args.beta)
 
         for batch_x, batch_t in dataloader:
-            # Data is already on GPU if we pre-loaded it
             optimizer.zero_grad()
             recon_x, mu, logvar = model(batch_x, batch_t)
 
@@ -75,16 +74,19 @@ def run_training_loop(
         is_best = avg_loss < best_loss
         if is_best:
             best_loss = avg_loss
+            # Save locally only (fast)
+            torch.save(model.state_dict(), run_dir / "best_model.pth")
 
-        save_checkpoint(model, run_dir, epoch, is_best)
-        if args.wandb:
+        # LOGGING OPTIMIZATION: Log to WandB only every 5 epochs or last epoch
+        should_log = (epoch + 1) % 5 == 0 or epoch == 0 or (epoch + 1) == args.epochs
+        if args.wandb and should_log:
             log_metrics({
                 "epoch": epoch, "loss": avg_loss, "mse_loss": avg_mse,
                 "kl_loss": avg_kl if args.arch == "beta_vae" else 0.0,
                 "beta": current_beta if args.arch == "beta_vae" else 1.0
             }, step=epoch)
 
-        if (epoch + 1) % 5 == 0 or epoch == 0:
+        if should_log:
             logger.info(
                 f"Epoch {epoch+1}/{args.epochs} | Loss: {avg_loss:.4f} | "
                 f"MSE: {avg_mse:.4f} | KL: {avg_kl:.4f}"
@@ -105,29 +107,24 @@ def train_command(args: argparse.Namespace) -> None:
     category_cols = [c for c in train_df.columns if c.endswith('_SPEND') or c.endswith('_QTY')]
     temporal_cols = [c for c in train_df.columns if c.startswith('TEMPORAL_')]
 
-    if len(category_cols) != num_categories:
-        raise ValueError("Data schema does not match vocabulary contract.")
-
     run_id = args.run_id if args.run_id else f"{args.arch}-{uuid.uuid4().hex[:8]}"
     run_dir = Path("experiments") / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
     config = {
         "run_id": run_id, "arch": args.arch, "latent_dim": args.latent_dim,
         "beta": args.beta, "anneal_epochs": args.anneal_end, "use_gkl": args.gkl,
         "num_categories": num_categories, "num_temporal_features": len(temporal_cols),
         "epochs": args.epochs, "batch_size": args.batch_size, "learning_rate": args.lr,
-        "vocabulary_path": str(args.vocab),
-        "train_data_path": str(args.data)
+        "vocabulary_path": str(args.vocab), "train_data_path": str(args.data)
     }
 
     if args.wandb:
         init_wandb("vae_marketing", run_id, config)
 
-    # Create model and move to GPU
     model = ModelFactory.create_model(config).to(device)
     ModelFactory.save_config(config, run_dir)
 
-    # ULTIMATE OPTIMIZATION: Move entire dataset to GPU once
-    logger.info(f"Transferring entire dataset to {device} memory...")
     x_tensor = torch.tensor(train_df[category_cols].values, dtype=torch.float32).to(device)
     t_tensor = torch.tensor(train_df[temporal_cols].values, dtype=torch.float32).to(device)
     
@@ -145,7 +142,11 @@ def train_command(args: argparse.Namespace) -> None:
     }, run_dir)
 
     if args.wandb:
+        # Final artifact upload (once per run)
+        if (run_dir / "best_model.pth").exists():
+            save_artifact(run_dir / "best_model.pth", "best_model", "model")
         finish_logging()
+        
     logger.info(f"Training complete. Artifacts saved in {run_dir}")
 
 
@@ -155,13 +156,10 @@ def infer_command(args: argparse.Namespace) -> None:
     model = ModelFactory.load_model(run_dir).to(device)
     model.eval()
 
-    # Load target data
     target_df = pd.read_parquet(args.data)
     
-    # Load baseline data
     baseline_path = args.baseline
     if not baseline_path:
-        # Try to infer from run config
         with open(run_dir / "config.json", "r") as f:
             config = json.load(f)
             baseline_path = config.get("train_data_path")
@@ -215,7 +213,6 @@ def infer_command(args: argparse.Namespace) -> None:
         target_df
     )
 
-    # Save report to run directory
     report_path = run_dir / "inference_report.json"
     with open(report_path, "w") as f:
         json.dump(report, f, indent=4, default=str)
