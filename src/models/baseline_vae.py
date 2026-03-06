@@ -5,13 +5,18 @@ from torch import nn
 class VAE(nn.Module):
     """Feedforward Variational Autoencoder with temporal auxiliary inputs."""
 
-    def __init__(self, latent_dim: int = 16, num_categories: int = 10, num_temporal_features: int = 6) -> None:
+    def __init__(
+        self,
+        latent_dim: int = 16,
+        num_categories: int = 10,
+        num_temporal_features: int = 6
+    ) -> None:
         """Initializes the VAE.
 
         Args:
             latent_dim: Dimension of the latent space (mu and logvar).
             num_categories: Number of input features (spend and qty per category).
-            num_temporal_features: Number of temporal context features (e.g., sin/cos for week, day, month).
+            num_temporal_features: Number of temporal context features (sin/cos).
         """
         super().__init__()
 
@@ -67,13 +72,21 @@ class VAE(nn.Module):
         inputs = torch.cat([z, t], dim=-1)
         return self.decoder(inputs)
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self,
+        x: torch.Tensor,
+        t: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Performs a forward pass of the VAE."""
         mu, logvar = self.encode(x, t)
         z = self.reparameterize(mu, logvar)
         recon_x = self.decode(z, t)
         return recon_x, mu, logvar
 
-def build_vae_model(latent_dim: int = 16, num_categories: int = 10, num_temporal_features: int = 6) -> nn.Module:
+def build_vae_model(
+    latent_dim: int = 16,
+    num_categories: int = 10,
+    num_temporal_features: int = 6
+) -> nn.Module:
     """Constructs the feedforward Variational Autoencoder."""
     return VAE(latent_dim, num_categories, num_temporal_features)

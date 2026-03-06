@@ -49,13 +49,13 @@ def load_and_preprocess_transaction_data(file_path: str) -> pl.DataFrame:
     try:
         # scan_csv is lazy, it won't load the whole file into memory
         lazy_df = pl.scan_csv(file_path, schema=RAW_TRANSACTION_SCHEMA)
-        
+
         # We perform operations on the lazy frame to keep memory usage low
         logger.info("Performing basic preprocessing on transaction data (lazy)...")
 
         # Convert 'DAY' to a more usable date format (assuming day 1 is '2023-01-01')
         base_date = pd.to_datetime("2023-01-01")
-        
+
         processed_lazy_df = lazy_df.with_columns(
             (pl.lit(base_date) + pl.duration(days=pl.col("DAY") - 1)).alias(
                 "transaction_date"
@@ -72,8 +72,8 @@ def load_and_preprocess_transaction_data(file_path: str) -> pl.DataFrame:
 
         # Drop rows where essential identifiers might still be missing
         processed_lazy_df = processed_lazy_df.filter(
-            (pl.col("household_key").is_not_null()) & 
-            (pl.col("household_key") != 0) & 
+            (pl.col("household_key").is_not_null()) &
+            (pl.col("household_key") != 0) &
             (pl.col("PRODUCT_ID").is_not_null()) &
             (pl.col("PRODUCT_ID") != 0)
         )
@@ -88,7 +88,7 @@ def load_and_preprocess_transaction_data(file_path: str) -> pl.DataFrame:
         # but for now we collect to return a DataFrame as per existing signature.
         # In a real 1TB scenario, this function would return a LazyFrame or sink to disk.
         df_pl = processed_lazy_df.collect()
-        
+
     except Exception as e:
         logger.error("Failed to process data: %s", e)
         raise

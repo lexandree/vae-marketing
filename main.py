@@ -2,192 +2,280 @@
 
 import argparse
 import json
-import logging
+import uuid
 from pathlib import Path
+from typing import Any, Dict, Tuple, Optional
 
-import numpy as np
 import pandas as pd
 import torch
+from torch.utils.data import DataLoader, TensorDataset
 
-from src.models.vae import build_vae_model
-from src.services.baseline import get_household_profile, train_baseline_vae
+from src.models.beta_vae import beta_vae_loss
+from src.models.factory import ModelFactory
+from src.services.baseline import get_household_profile, vae_loss
 from src.services.impact_analysis import (
     analyze_persistence,
     calculate_deviation,
     categorize_shift,
 )
-from src.services.reporting import generate_aggregate_report
+from src.services.reporting_baseline import generate_aggregate_report
 from src.utils.metrics import setup_logger
 from src.utils.seed import set_seed
+from src.utils.wandb_logger import finish_logging, init_wandb, log_metrics, save_checkpoint
 
 set_seed(42)
 logger = setup_logger(__name__)
 
 
+def run_training_loop(
+    model: torch.nn.Module,
+    dataloader: DataLoader,
+    config: Dict[str, Any],
+    run_dir: Path,
+    args: argparse.Namespace
+) -> Tuple[float, float]:
+    """Executes the training loop for the given model and data."""
+    optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"])
+    best_loss = float('inf')
+    avg_kl = 0.0
+
+    model.train()
+    for epoch in range(args.epochs):
+        total_loss, total_mse, total_kl = 0.0, 0.0, 0.0
+        current_beta = args.beta
+        if args.arch == "beta_vae":
+            current_beta = model.get_beta(epoch, args.anneal_end, args.beta)
+
+        for batch_x, batch_t in dataloader:
+            optimizer.zero_grad()
+            recon_x, mu, logvar = model(batch_x, batch_t)
+
+            if args.arch == "beta_vae":
+                loss, mse, kl = beta_vae_loss(
+                    recon_x, batch_x, mu, logvar, current_beta, use_gkl=args.gkl
+                )
+                total_mse += mse.item()
+                total_kl += kl.item()
+            else:
+                loss = vae_loss(recon_x, batch_x, mu, logvar)
+                total_mse += loss.item()
+
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+
+        avg_loss = total_loss / len(dataloader)
+        avg_mse = total_mse / len(dataloader)
+        avg_kl = total_kl / len(dataloader)
+
+        is_best = avg_loss < best_loss
+        if is_best:
+            best_loss = avg_loss
+
+        save_checkpoint(model, run_dir, epoch, is_best)
+        if args.wandb:
+            log_metrics({
+                "epoch": epoch, "loss": avg_loss, "mse_loss": avg_mse,
+                "kl_loss": avg_kl if args.arch == "beta_vae" else 0.0,
+                "beta": current_beta if args.arch == "beta_vae" else 1.0
+            }, step=epoch)
+
+        if (epoch + 1) % 5 == 0 or epoch == 0:
+            logger.info(
+                f"Epoch {epoch+1}/{args.epochs} | Loss: {avg_loss:.4f} | "
+                f"MSE: {avg_mse:.4f} | KL: {avg_kl:.4f}"
+            )
+
+    return best_loss, avg_kl
+
+
 def train_command(args: argparse.Namespace) -> None:
-    """Train the VAE baseline model."""
+    """Train the VAE model (Baseline or Beta)."""
     logger.info(f"Loading training data from {args.data}")
     train_df = pd.read_parquet(args.data)
-    
-    logger.info(f"Loading vocabulary from {args.vocab}")
+
     with open(args.vocab, 'r') as f:
         vocab = json.load(f)
-        
-    # The true shape is defined by the vocabulary (which acts as a contract)
-    # The vocabulary extracted by prepare.py already includes 'UNKNOWN'
+
     num_categories = len(vocab) * 2
-    num_temporal = 6
-    
-    # We enforce that the dataset strictly matches the vocabulary contract
     category_cols = [c for c in train_df.columns if c.endswith('_SPEND') or c.endswith('_QTY')]
+    temporal_cols = [c for c in train_df.columns if c.startswith('TEMPORAL_')]
+
     if len(category_cols) != num_categories:
-        logger.error(f"Schema mismatch: vocabulary expects {num_categories} category features, "
-                     f"but data contains {len(category_cols)}. Ensure data was prepared with the same vocabulary.")
         raise ValueError("Data schema does not match vocabulary contract.")
-        
-    logger.info(f"Initializing VAE Model (categories={num_categories}, temporal={num_temporal})...")
-    model = build_vae_model(
-        latent_dim=16, 
-        num_categories=num_categories, 
-        num_temporal_features=num_temporal
+
+    run_id = args.run_id if args.run_id else f"{args.arch}-{uuid.uuid4().hex[:8]}"
+    run_dir = Path("experiments") / run_id
+    config = {
+        "run_id": run_id, "arch": args.arch, "latent_dim": args.latent_dim,
+        "beta": args.beta, "anneal_epochs": args.anneal_end, "use_gkl": args.gkl,
+        "num_categories": num_categories, "num_temporal_features": len(temporal_cols),
+        "epochs": args.epochs, "batch_size": 64, "learning_rate": args.lr,
+        "vocabulary_path": str(args.vocab),
+        "train_data_path": str(args.data)
+    }
+
+    if args.wandb:
+        init_wandb("vae_marketing", run_id, config)
+
+    model = ModelFactory.create_model(config)
+    ModelFactory.save_config(config, run_dir)
+
+    x_tensor = torch.tensor(train_df[category_cols].values, dtype=torch.float32)
+    t_tensor = torch.tensor(train_df[temporal_cols].values, dtype=torch.float32)
+    dataloader = DataLoader(
+        TensorDataset(x_tensor, t_tensor), batch_size=config["batch_size"], shuffle=True
     )
-    
-    logger.info("Training VAE on baseline data...")
-    trained_model = train_baseline_vae(
-        data=train_df,
-        model=model,
-        epochs=args.epochs,
-        batch_size=64,
-        learning_rate=1e-3
-    )
-    
-    logger.info(f"Saving trained model to {args.model_out}")
-    # Ensure directory exists
-    args.model_out.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(trained_model.state_dict(), args.model_out)
+
+    best_loss, last_kl = run_training_loop(model, dataloader, config, run_dir, args)
+
+    ModelFactory.save_metrics({
+        "mse_loss": best_loss, "kl_divergence": last_kl,
+        "mig_score": 0.0, "sap_score": 0.0
+    }, run_dir)
+
+    if args.wandb:
+        finish_logging()
+    logger.info(f"Training complete. Artifacts saved in {run_dir}")
 
 
 def infer_command(args: argparse.Namespace) -> None:
     """Run impact analysis inference using trained model."""
-    logger.info(f"Loading post-stimulus (inference) data from {args.data}")
-    val_df = pd.read_parquet(args.data)
-    
-    logger.info(f"Loading vocabulary from {args.vocab}")
-    with open(args.vocab, 'r') as f:
-        vocab = json.load(f)
-        
-    num_categories = len(vocab) * 2
-    num_temporal = 6
-    
-    # We enforce that the dataset strictly matches the vocabulary contract
-    category_cols = [c for c in val_df.columns if c.endswith('_SPEND') or c.endswith('_QTY')]
-    if len(category_cols) != num_categories:
-        logger.error(f"Schema mismatch: vocabulary expects {num_categories} category features, "
-                     f"but inference data contains {len(category_cols)}.")
-        raise ValueError("Inference data schema does not match vocabulary contract.")
-        
-    logger.info("Initializing VAE Model...")
-    model = build_vae_model(
-        latent_dim=16, 
-        num_categories=num_categories, 
-        num_temporal_features=num_temporal
-    )
-    
-    logger.info(f"Loading model weights from {args.model_in}")
-    model.load_state_dict(torch.load(args.model_in))
+    run_dir = Path("experiments") / args.run_id
+    model = ModelFactory.load_model(run_dir)
     model.eval()
 
-    logger.info("Loading baseline reference profiles from training data...")
-    # To calculate deviation, we need the baseline profile for each household.
-    # In a real scenario, this would be pre-calculated and stored.
-    # For now, we load train.parquet to compute the baseline profile on the fly.
-    train_df = pd.read_parquet(args.train_data)
+    # Load target data
+    target_df = pd.read_parquet(args.data)
+    
+    # Load baseline data
+    baseline_path = args.baseline
+    if not baseline_path:
+        # Try to infer from run config
+        with open(run_dir / "config.json", "r") as f:
+            config = json.load(f)
+            baseline_path = config.get("train_data_path")
+            
+    if not baseline_path or not Path(baseline_path).exists():
+        raise FileNotFoundError("Baseline data not found. Use --baseline.")
+        
+    logger.info(f"Loading baseline from {baseline_path}")
+    base_df = pd.read_parquet(baseline_path)
+
     baseline_profiles = {}
+    valid_households = sorted(list(set(base_df["HOUSEHOLD_KEY"].unique()).intersection(
+        set(target_df["HOUSEHOLD_KEY"].unique())
+    )))
     
-    # We only analyze households that exist in both train and inference data
-    valid_households = set(train_df["HOUSEHOLD_KEY"].unique()).intersection(set(val_df["HOUSEHOLD_KEY"].unique()))
-    
+    if args.limit and len(valid_households) > args.limit:
+        import random
+        random.seed(42)
+        valid_households = random.sample(valid_households, args.limit)
+        
     logger.info(f"Analyzing impact for {len(valid_households)} households...")
-    
+
     shift_results = []
-    
+    stimulus_end_day = (
+        int(base_df["WINDOW_START_DAY"].max()) if "WINDOW_START_DAY" in base_df else 0
+    )
+
     for h_id in valid_households:
-        h_base = train_df[train_df["HOUSEHOLD_KEY"] == h_id]
+        h_base = base_df[base_df["HOUSEHOLD_KEY"] == h_id]
         base_prof = get_household_profile(model, h_base)
         baseline_profiles[h_id] = base_prof
-        
-        h_post = val_df[val_df["HOUSEHOLD_KEY"] == h_id]
-        
+
+        h_post = target_df[target_df["HOUSEHOLD_KEY"] == h_id]
         dev = calculate_deviation(base_prof, h_post, model)
         cat = categorize_shift(h_base, h_post)
-        
-        # Determine stimulus end day (simplified assumption: max day in train)
-        stimulus_end_day = int(train_df["WINDOW_START_DAY"].max())
         pers = analyze_persistence(h_post, stimulus_end_day, model, base_prof, threshold=2.0)
 
-        shift_results.append(
-            {
-                "household_id": h_id,
-                "stimulus_id": "VAL_PERIOD",
-                "quantitative_magnitude": dev,
-                "qualitative_nature": cat,
-                "persistence_duration_days": pers,
-            }
-        )
+        shift_results.append({
+            "household_id": h_id, "stimulus_id": "VAL_PERIOD",
+            "quantitative_magnitude": dev, "qualitative_nature": cat,
+            "persistence_duration_days": pers,
+        })
 
-    shifts_df = pd.DataFrame(shift_results)
-    
-    # Generate reporting format
-    logger.info("Generating aggregate impact report...")
-    
-    # Mocking profiles_df for reporting compatibility
-    profiles_df = pd.DataFrame([
-        {"household_id": k, "baseline_profile": v} 
+    profiles_data = [
+        {"household_id": k, "baseline_profile": v}
         for k, v in baseline_profiles.items()
-    ])
-    
-    report = generate_aggregate_report(profiles_df, shifts_df, val_df)
+    ]
+    report = generate_aggregate_report(
+        pd.DataFrame(profiles_data),
+        pd.DataFrame(shift_results),
+        target_df
+    )
 
-    # Output results
-    print("\n" + "=" * 50)
-    print("PIPELINE INFERENCE SUMMARY")
-    print("=" * 50)
+    # Save report to run directory
+    report_path = run_dir / "inference_report.json"
+    with open(report_path, "w") as f:
+        json.dump(report, f, indent=4, default=str)
+
+    print("\n" + "=" * 50 + "\nPIPELINE INFERENCE SUMMARY\n" + "=" * 50)
     print(f"Total Households Analyzed: {report['total_households_analyzed']}")
     print(f"Average Latent Deviation: {report['average_magnitude']:.4f}")
     print(f"Average Persistence: {report['average_persistence_days']:.1f} days")
-    print("\nSegment Distribution:")
-    for cluster, count in report["segments"].items():
-        print(f"  Cluster {cluster}: {count} households")
-    print("\nTop Sensitive Categories (Placeholder until Phase 4):")
-    for cat in report["top_sensitive_categories"]:
-        print(f"  {cat['product_category']}: Score {cat['sensitivity_score']:.2f}")
+    print(f"Report saved to: {report_path}")
+    print("=" * 50 + "\n")
+
+
+def compare_command(args: argparse.Namespace) -> None:
+    """Compare metrics across multiple Run-IDs."""
+    results = []
+    for run_id in args.run_ids:
+        run_dir = Path("experiments") / run_id
+        if (run_dir / "metrics.json").exists() and (run_dir / "config.json").exists():
+            with open(run_dir / "metrics.json", "r") as f:
+                m = json.load(f)
+            with open(run_dir / "config.json", "r") as f:
+                c = json.load(f)
+            m.update({"run_id": run_id, "arch": c.get("arch", "baseline")})
+            results.append(m)
+
+    if not results:
+        return logger.error("No valid runs found to compare.")
+
+    df = pd.DataFrame(results)
+    cols = ["run_id", "arch", "mse_loss", "kl_divergence", "mig_score", "sap_score"]
+    print("\n" + "=" * 50 + "\nMODEL COMPARISON SUMMARY\n" + "=" * 50)
+    print(df[[c for c in cols if c in df.columns]].to_markdown(index=False))
     print("=" * 50 + "\n")
 
 
 def main() -> None:
+    """Main entry point for the CLI."""
     parser = argparse.ArgumentParser(description="VAE Marketing Impact Analysis")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Train subparser
-    train_parser = subparsers.add_parser("train", help="Train baseline VAE")
-    train_parser.add_argument("--data", type=Path, required=True, help="Path to train.parquet")
-    train_parser.add_argument("--vocab", type=Path, required=True, help="Path to vocabulary.json")
-    train_parser.add_argument("--model-out", type=Path, required=True, help="Path to save model.pt")
-    train_parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
+    train_parser = subparsers.add_parser("train", help="Train baseline or Beta VAE")
+    train_parser.add_argument("--data", type=Path, required=True)
+    train_parser.add_argument("--vocab", type=Path, required=True)
+    train_parser.add_argument(
+        "--arch", type=str, default="baseline", choices=["baseline", "beta_vae"]
+    )
+    train_parser.add_argument("--run-id", type=str, default=None)
+    train_parser.add_argument("--beta", type=float, default=1.0)
+    train_parser.add_argument("--anneal-end", type=int, default=0)
+    train_parser.add_argument("--latent-dim", type=int, default=16)
+    train_parser.add_argument("--epochs", type=int, default=20)
+    train_parser.add_argument("--wandb", action="store_true")
+    train_parser.add_argument("--gkl", action="store_true")
 
-    # Infer subparser
-    infer_parser = subparsers.add_parser("infer", help="Run inference on validation/test data")
-    infer_parser.add_argument("--data", type=Path, required=True, help="Path to val.parquet or test.parquet")
-    infer_parser.add_argument("--train-data", type=Path, required=True, help="Path to train.parquet for baseline references")
-    infer_parser.add_argument("--vocab", type=Path, required=True, help="Path to vocabulary.json")
-    infer_parser.add_argument("--model-in", type=Path, required=True, help="Path to load model.pt")
+    infer_parser = subparsers.add_parser("infer", help="Run inference on data")
+    infer_parser.add_argument("--run-id", type=str, required=True)
+    infer_parser.add_argument("--data", type=Path, required=True)
+    infer_parser.add_argument("--baseline", type=Path, default=None)
+    infer_parser.add_argument("--limit", type=int, default=None)
+
+    compare_parser = subparsers.add_parser("compare", help="Compare across Run-IDs")
+    compare_parser.add_argument("run_ids", nargs="+")
 
     args = parser.parse_args()
-
     if args.command == "train":
         train_command(args)
     elif args.command == "infer":
         infer_command(args)
+    elif args.command == "compare":
+        compare_command(args)
 
 
 if __name__ == "__main__":
