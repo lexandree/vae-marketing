@@ -203,12 +203,17 @@ def infer_command(args: argparse.Namespace) -> None:
 
         h_post = target_df[target_df["HOUSEHOLD_KEY"] == h_id]
         dev = calculate_deviation(base_prof, h_post, model)
-        cat = categorize_shift(h_base, h_post)
+        # Collect full vector for reporting
+        dev_vec = calculate_deviation(base_prof, h_post, model, return_vector=True)
+        
+        cat = categorize_shift(h_base, h_post, baseline_profile=base_prof, post_profile=(base_prof + dev_vec))
         pers = analyze_persistence(h_post, stimulus_end_day, model, base_prof, threshold=2.0)
 
         shift_results.append({
             "household_id": h_id, "stimulus_id": "VAL_PERIOD",
-            "quantitative_magnitude": dev, "qualitative_nature": cat,
+            "quantitative_magnitude": dev, 
+            "latent_vector": dev_vec.tolist(),
+            "qualitative_nature": cat,
             "persistence_duration_days": pers,
         })
 

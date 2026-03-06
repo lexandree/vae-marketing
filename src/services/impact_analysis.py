@@ -7,17 +7,19 @@ from torch import nn
 def calculate_deviation(
     baseline_profile: np.ndarray,
     post_stimulus_data: pd.DataFrame,
-    model: nn.Module
-) -> float:
-    """Calculates the quantitative magnitude of shift (e.g., Euclidean distance in latent space).
+    model: nn.Module,
+    return_vector: bool = False
+) -> Any:
+    """Calculates the quantitative magnitude of shift.
 
     Args:
         baseline_profile: The baseline latent representation (mu vector).
         post_stimulus_data: DataFrame containing transactions during/after the stimulus.
         model: The trained VAE model.
+        return_vector: If True, returns raw difference vector instead of distance.
 
     Returns:
-        The Euclidean distance between the baseline profile and the post-stimulus profile.
+        Euclidean distance (float) or difference vector (np.ndarray).
     """
     model.eval()
 
@@ -30,17 +32,22 @@ def calculate_deviation(
     if not category_cols or not temporal_cols:
         raise ValueError("Post-stimulus data missing required columns (categories or temporal).")
 
-    x_tensor = torch.tensor(post_stimulus_data[category_cols].values, dtype=torch.float32)
-    t_tensor = torch.tensor(post_stimulus_data[temporal_cols].values, dtype=torch.float32)
+    # Get device from model
+    model_device = next(model.parameters()).device
+
+    x_tensor = torch.tensor(post_stimulus_data[category_cols].values, dtype=torch.float32).to(model_device)
+    t_tensor = torch.tensor(post_stimulus_data[temporal_cols].values, dtype=torch.float32).to(model_device)
 
     with torch.no_grad():
         mu, _ = model.encode(x_tensor, t_tensor)
 
-    post_profile = mu.mean(dim=0).numpy()
+    post_profile = mu.mean(dim=0).cpu().numpy()
+    diff_vector = post_profile - baseline_profile
 
-    # Calculate Euclidean distance
-    distance = np.linalg.norm(baseline_profile - post_profile)
-    return float(distance)
+    if return_vector:
+        return diff_vector
+        
+    return float(np.linalg.norm(diff_vector))
 
 
 def _categorize_from_latent(delta: np.ndarray) -> str:
@@ -48,6 +55,8 @@ def _categorize_from_latent(delta: np.ndarray) -> str:
     if len(delta) < 2:
         return "Unknown"
 
+    # Price sensitivity is usually one of the top factors in Beta-VAE
+    # We use raw indices until mapping is done via MIG/SAP
     price_shift = delta[0]
     volume_shift = delta[1]
 
@@ -85,19 +94,7 @@ def categorize_shift(
     baseline_profile: np.ndarray = None,
     post_profile: np.ndarray = None
 ) -> str:
-    """Categorizes the qualitative nature of shift into predefined categories.
-
-    Uses latent profiles if available, otherwise falls back to data heuristics.
-
-    Args:
-        baseline_data: DataFrame of household transactions before the stimulus.
-        post_stimulus_data: DataFrame of household transactions during/after the stimulus.
-        baseline_profile: Baseline latent profile.
-        post_profile: Post-stimulus latent profile.
-
-    Returns:
-        A string representing the category of shift (e.g., 'Trading Up', 'Stockpiling').
-    """
+    """Categorizes the qualitative nature of shift into predefined categories."""
     if baseline_profile is not None and post_profile is not None:
         return _categorize_from_latent(post_profile - baseline_profile)
 
@@ -114,23 +111,15 @@ def analyze_persistence(
     baseline_profile: np.ndarray,
     threshold: float = 0.5
 ) -> int:
-    """Returns the number of days until the household behavior returns to the baseline.
-
-    Args:
-        household_data: DataFrame of household transactions after the stimulus.
-        stimulus_end_day: Day index of when the stimulus ended.
-        model: The trained VAE model.
-        baseline_profile: The baseline latent representation.
-        threshold: The distance threshold to consider behavior "returned to normal".
-
-    Returns:
-        Number of days for persistence.
-    """
+    """Returns the number of days until the household behavior returns to the baseline."""
     if "WINDOW_START_DAY" not in household_data.columns:
         return 0
 
     # Sort data chronologically
     df = household_data.sort_values("WINDOW_START_DAY")
+    
+    # Get device from model
+    model_device = next(model.parameters()).device
 
     for _i, (_, row) in enumerate(df.iterrows()):
         row_df = pd.DataFrame([row])

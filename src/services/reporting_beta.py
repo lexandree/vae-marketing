@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from src.services.reporting_baseline import rank_sensitive_categories, segment_consumers
 
 
@@ -9,15 +10,7 @@ def generate_aggregate_report(
 ) -> dict:
     """Generates the comprehensive aggregate impact report for Beta-VAE.
 
-    Includes factor-level breakdowns thanks to disentangled representations.
-
-    Args:
-        profiles_df: DataFrame of baseline profiles.
-        shifts_df: DataFrame of calculated shifts.
-        transactions: Post-stimulus transactions.
-
-    Returns:
-        A dictionary containing the report metrics including factor breakdown.
+    Includes real factor-level breakdowns based on latent space deviations.
     """
     segmented = segment_consumers(shifts_df)
     ranked_cats = rank_sensitive_categories(shifts_df, transactions)
@@ -31,20 +24,21 @@ def generate_aggregate_report(
     avg_persistence = 0.0
     factor_impacts = {}
 
-    if not shifts_df.empty:
+    if not shifts_df.empty and 'latent_vector' in shifts_df.columns:
         avg_magnitude = shifts_df['quantitative_magnitude'].mean()
         avg_persistence = shifts_df['persistence_duration_days'].mean()
 
-        # Polymorphic: Calculate average impact per latent dimension
-        # (Assuming latent deviation is calculated per-dimension in a more advanced version)
-        # For now, we simulate the factor-level decomposition
-        # In a real scenario, we'd look at the delta of mu vectors
-        factor_impacts = {
-            "factor_0_volume": 0.45,
-            "factor_1_price_sensitivity": 0.30,
-            "factor_2_brand_loyalty": 0.15,
-            "factor_others": 0.10
-        }
+        # Calculate average absolute deviation per latent dimension
+        # shifts_df['latent_vector'] contains lists of floats
+        all_vectors = np.array(shifts_df['latent_vector'].tolist())
+        mean_abs_dev = np.mean(np.abs(all_vectors), axis=0)
+        
+        # Identify top moving factors
+        top_indices = np.argsort(mean_abs_dev)[::-1]
+        
+        for idx in top_indices:
+            # For now we use generic names, but MIG/SAP scores will soon map these to real concepts
+            factor_impacts[f"latent_factor_{idx}"] = float(mean_abs_dev[idx])
 
     return {
         "total_households_analyzed": len(profiles_df),
