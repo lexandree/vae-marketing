@@ -74,19 +74,25 @@ def run_training_loop(
         is_best = avg_loss < best_loss
         if is_best:
             best_loss = avg_loss
-            # Save locally only (fast)
             torch.save(model.state_dict(), run_dir / "best_model.pth")
 
-        # LOGGING OPTIMIZATION: Log to WandB only every 5 epochs or last epoch
-        should_log = (epoch + 1) % 5 == 0 or epoch == 0 or (epoch + 1) == args.epochs
-        if args.wandb and should_log:
+        # LOGGING: respect verbosity
+        should_log_wandb = args.wandb and (
+            (epoch + 1) % 5 == 0 or epoch == 0 or (epoch + 1) == args.epochs or args.verbosity > 1
+        )
+        
+        if should_log_wandb:
             log_metrics({
                 "epoch": epoch, "loss": avg_loss, "mse_loss": avg_mse,
                 "kl_loss": avg_kl if args.arch == "beta_vae" else 0.0,
                 "beta": current_beta if args.arch == "beta_vae" else 1.0
             }, step=epoch)
 
-        if should_log:
+        should_log_console = (
+            (epoch + 1) % 5 == 0 or epoch == 0 or (epoch + 1) == args.epochs or args.verbosity > 1
+        ) and args.verbosity > 0
+
+        if should_log_console:
             logger.info(
                 f"Epoch {epoch+1}/{args.epochs} | Loss: {avg_loss:.4f} | "
                 f"MSE: {avg_mse:.4f} | KL: {avg_kl:.4f}"
@@ -97,7 +103,9 @@ def run_training_loop(
 
 def train_command(args: argparse.Namespace) -> None:
     """Train the VAE model (Baseline or Beta)."""
-    logger.info(f"Loading training data from {args.data}")
+    if args.verbosity > 0:
+        logger.info(f"Loading training data from {args.data}")
+    
     train_df = pd.read_parquet(args.data)
 
     with open(args.vocab, 'r') as f:
@@ -120,7 +128,7 @@ def train_command(args: argparse.Namespace) -> None:
     }
 
     if args.wandb:
-        init_wandb("vae_marketing", run_id, config)
+        init_wandb("vae_marketing", run_id, config, verbosity=args.verbosity)
 
     model = ModelFactory.create_model(config).to(device)
     ModelFactory.save_config(config, run_dir)
@@ -142,12 +150,13 @@ def train_command(args: argparse.Namespace) -> None:
     }, run_dir)
 
     if args.wandb:
-        # Final artifact upload (once per run)
-        if (run_dir / "best_model.pth").exists():
+        # Final artifact upload (once per run) if requested
+        if args.upload_model and (run_dir / "best_model.pth").exists():
             save_artifact(run_dir / "best_model.pth", "best_model", "model")
-        finish_logging()
+        finish_logging(verbosity=args.verbosity)
         
-    logger.info(f"Training complete. Artifacts saved in {run_dir}")
+    if args.verbosity > 0:
+        logger.info(f"Training complete. Artifacts saved in {run_dir}")
 
 
 def infer_command(args: argparse.Namespace) -> None:
@@ -267,6 +276,8 @@ def main() -> None:
     train_parser.add_argument("--batch-size", type=int, default=64)
     train_parser.add_argument("--lr", type=float, default=1e-3)
     train_parser.add_argument("--wandb", action="store_true")
+    train_parser.add_argument("--upload-model", action="store_true")
+    train_parser.add_argument("--verbosity", type=int, default=1, choices=[0, 1, 2])
     train_parser.add_argument("--gkl", action="store_true")
 
     infer_parser = subparsers.add_parser("infer", help="Run inference on data")
