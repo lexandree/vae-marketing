@@ -257,6 +257,7 @@ def main() -> None:
     train_parser.add_argument("--anneal-end", type=int, default=0)
     train_parser.add_argument("--latent-dim", type=int, default=16)
     train_parser.add_argument("--epochs", type=int, default=20)
+    train_parser.add_argument("--lr", type=float, default=1e-3)
     train_parser.add_argument("--wandb", action="store_true")
     train_parser.add_argument("--gkl", action="store_true")
 
