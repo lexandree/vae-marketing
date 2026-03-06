@@ -26,6 +26,9 @@ from src.utils.wandb_logger import finish_logging, init_wandb, log_metrics, save
 set_seed(42)
 logger = setup_logger(__name__)
 
+# Device configuration
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def run_training_loop(
     model: torch.nn.Module,
@@ -47,6 +50,10 @@ def run_training_loop(
             current_beta = model.get_beta(epoch, args.anneal_end, args.beta)
 
         for batch_x, batch_t in dataloader:
+            # Move data to GPU
+            batch_x = batch_x.to(device)
+            batch_t = batch_t.to(device)
+
             optimizer.zero_grad()
             recon_x, mu, logvar = model(batch_x, batch_t)
 
@@ -91,7 +98,7 @@ def run_training_loop(
 
 def train_command(args: argparse.Namespace) -> None:
     """Train the VAE model (Baseline or Beta)."""
-    logger.info(f"Loading training data from {args.data}")
+    logger.info(f"Loading training data on {device}...")
     train_df = pd.read_parquet(args.data)
 
     with open(args.vocab, 'r') as f:
@@ -118,7 +125,8 @@ def train_command(args: argparse.Namespace) -> None:
     if args.wandb:
         init_wandb("vae_marketing", run_id, config)
 
-    model = ModelFactory.create_model(config)
+    # Create model and move to GPU
+    model = ModelFactory.create_model(config).to(device)
     ModelFactory.save_config(config, run_dir)
 
     x_tensor = torch.tensor(train_df[category_cols].values, dtype=torch.float32)
@@ -142,7 +150,7 @@ def train_command(args: argparse.Namespace) -> None:
 def infer_command(args: argparse.Namespace) -> None:
     """Run impact analysis inference using trained model."""
     run_dir = Path("experiments") / args.run_id
-    model = ModelFactory.load_model(run_dir)
+    model = ModelFactory.load_model(run_dir).to(device)
     model.eval()
 
     # Load target data
@@ -181,6 +189,7 @@ def infer_command(args: argparse.Namespace) -> None:
 
     for h_id in valid_households:
         h_base = base_df[base_df["HOUSEHOLD_KEY"] == h_id]
+        # Baseline profile logic needs device awareness too
         base_prof = get_household_profile(model, h_base)
         baseline_profiles[h_id] = base_prof
 
