@@ -11,11 +11,12 @@ logger = logging.getLogger(__name__)
 
 def vae_loss(recon_x: torch.Tensor, x: torch.Tensor, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
     """Calculates the combined Reconstruction + KL divergence loss."""
-    # Using MSE for reconstruction, can be configured based on data scaling
-    recon_loss = F.mse_loss(recon_x, x, reduction='sum')
+    # Using MSE for reconstruction, scaled per sample
+    recon_loss = F.mse_loss(recon_x, x, reduction='sum') / x.shape[0]
 
-    # KL Divergence: 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-    kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    # KL Divergence: -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+    kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
+    kl_loss = torch.mean(kl_div)
 
     return recon_loss + kl_loss
 
