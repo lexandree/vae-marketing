@@ -1,25 +1,25 @@
 name: vae-marketing-finetuning
 project: vae_marketing
 program: main.py
-method: bayes # Используем байесовский поиск для более точной настройки
+method: bayes
 metric:
   name: loss
   goal: minimize
 parameters:
   latent-dim:
-    values: [64, 128, 256] # Проверим, поможет ли еще большее пространство
+    values: [64, 128, 256]
   beta:
     distribution: uniform
-    min: 0.0001
-    max: 0.0008 # Сфокусировались на лучшем диапазоне
+    min: 0.1
+    max: 5.0
   batch-size:
-    value: 1024 # Зафиксировали лучший результат
+    value: 1024
   lr:
     distribution: uniform
     min: 0.001
     max: 0.003
   epochs:
-    value: 30 # Увеличили для более точной оценки
+    value: 30
   anneal-end:
     values: [5, 10, 15]
   arch:

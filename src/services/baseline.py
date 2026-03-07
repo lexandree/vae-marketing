@@ -15,12 +15,16 @@ def vae_loss(
     mu: torch.Tensor,
     logvar: torch.Tensor
 ) -> torch.Tensor:
-    """Calculates the combined Reconstruction + KL divergence loss."""
-    # Using MSE for reconstruction, can be configured based on data scaling
-    mse_loss = nn.functional.mse_loss(recon_x, x, reduction="sum")
+    """Calculates the combined Reconstruction + KL divergence loss.
+    
+    Uses per-sample normalization.
+    """
+    # Using MSE for reconstruction, scaled per sample
+    mse_loss = nn.functional.mse_loss(recon_x, x, reduction="sum") / x.shape[0]
 
     # KL divergence: -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-    kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
+    kl_loss = torch.mean(kl_div)
 
     return mse_loss + kl_loss
 

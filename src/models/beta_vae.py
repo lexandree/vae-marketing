@@ -96,8 +96,12 @@ def beta_vae_loss(
     beta: float,
     use_gkl: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Calculate Beta-VAE loss (MSE + β * KL)."""
-    mse_loss = nn.functional.mse_loss(recon_x, x, reduction='mean')
+    """Calculate Beta-VAE loss (MSE + β * KL).
+    
+    Uses per-sample normalization to maintain balance regardless of feature count.
+    """
+    # MSE sum per sample, then averaged over batch
+    mse_loss = nn.functional.mse_loss(recon_x, x, reduction='sum') / x.shape[0]
 
     if use_gkl:
         # Experimental Generalized KL divergence proxy for long-tail transaction data
