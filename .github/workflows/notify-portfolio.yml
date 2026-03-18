@@ -1,0 +1,26 @@
+name: Notify Portfolio
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'portfolio-export.md'
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send repository dispatch to Portfolio
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          # A Personal Access Token (PAT) with "repo" scope is required.
+          # Create it in GitHub Settings -> Developer settings -> Tokens (classic)
+          # Add it to THIS repository secrets as PAT_FOR_PORTFOLIO.
+          token: ${{ secrets.PAT_FOR_PORTFOLIO }}
+          repository: lexandree/schaufenster
+          event-type: portfolio-update
+          
+          # UPDATE THIS: Replace with your actual project name
+          client-payload: '{"project": "vae-marketing"}'

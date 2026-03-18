@@ -87,6 +87,13 @@ Automate the search for optimal `beta`, `latent-dim`, and `learning-rate`.
 1. Initialize the sweep: `wandb sweep sweep.yaml`
 2. Start the agent: `wandb agent <ENTITY>/vae_marketing/<SWEEP_ID>`
 
+#### Example Training Dynamics (Beta-VAE)
+The model effectively balances reconstruction fidelity (MSE Loss) with latent space regularization (KL Divergence) over a carefully tuned annealing schedule.
+
+![Training Curves](docs/images/training_curves.svg)
+
+![Beta Annealing](docs/images/beta_annealing.svg)
+
 ---
 
 ## Project Structure
