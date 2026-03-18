@@ -57,3 +57,9 @@ venv.bak/
 experiments/*
 !experiments/**/config.json
 weights.pt
+
+# Temp and logs
+tmp/
+wandb/
+processed/
+
