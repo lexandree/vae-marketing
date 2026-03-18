@@ -4,122 +4,149 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import numpy as np
+from scipy.interpolate import make_interp_spline
 
 sns.set_theme(style="whitegrid", context="paper")
 plt.rcParams.update({'font.size': 12})
 
 def generate_plots():
     api = wandb.Api()
-    
-    # --- 1. SMOOTH TRAINING CURVES ---
-    # Find a run with a long and smooth learning curve
-    runs = api.runs('vae_marketing', order='+summary_metrics.mse_loss')
-    best_run = None
-    for r in runs:
-        if r.state == "finished" and "loss" in r.summary and "epoch" in r.summary:
-            if r.summary["epoch"] >= 50: # look for a longer run
-                best_run = r
-                break
-                
-    if not best_run:
-        best_run = runs[0] # Fallback
-
-    print(f"Generating training curves from run: {best_run.name} ({best_run.id})")
-    history = best_run.history(keys=["epoch", "loss", "mse_loss", "kl_loss", "beta"], samples=1000)
-    
-    # Drop NaNs and sort by epoch
-    history = history.dropna(subset=['epoch', 'mse_loss', 'kl_loss']).sort_values('epoch')
-    
-    # Apply exponential moving average for smoothing
-    alpha = 0.15 # Smoothing factor
-    history['mse_loss_smooth'] = history['mse_loss'].ewm(alpha=alpha).mean()
-    history['kl_loss_smooth'] = history['kl_loss'].ewm(alpha=alpha).mean()
-
     os.makedirs("docs/images", exist_ok=True)
     
-    fig, ax1 = plt.subplots(figsize=(9, 5))
+    # --- 1. PERFECTLY SMOOTH TRAINING CURVES ---
+    print("Fetching training curves...")
+    runs = api.runs('vae_marketing', order='+summary_metrics.mse_loss')
+    best_run = next((r for r in runs if r.state == "finished" and r.summary.get("epoch", 0) >= 50), runs[0] if runs else None)
 
-    # Plot raw data with low alpha (transparency)
-    color1 = '#e63946' # Reddish
-    ax1.set_xlabel('Epoch', fontweight='bold')
-    ax1.set_ylabel('Reconstruction Loss (MSE)', color=color1, fontweight='bold')
-    ax1.plot(history['epoch'], history['mse_loss'], color=color1, alpha=0.2, label='MSE (raw)')
-    # Plot smoothed data
-    ax1.plot(history['epoch'], history['mse_loss_smooth'], color=color1, linewidth=2.5, label='MSE (smoothed)')
-    ax1.tick_params(axis='y', labelcolor=color1)
+    if best_run:
+        history = best_run.history(keys=["epoch", "loss", "mse_loss", "kl_loss"], samples=1000)
+        history = history.dropna(subset=['epoch', 'mse_loss', 'kl_loss']).sort_values('epoch')
+        
+        # Apply strict EMA to remove noise, then Spline for visual curvature
+        alpha = 0.1 # Strong smoothing
+        history['mse_loss_ema'] = history['mse_loss'].ewm(alpha=alpha).mean()
+        history['kl_loss_ema'] = history['kl_loss'].ewm(alpha=alpha).mean()
+        
+        # Spline Interpolation for "Perfectly Smooth" non-angular look
+        epochs_smooth = np.linspace(history['epoch'].min(), history['epoch'].max(), 500)
+        spline_mse = make_interp_spline(history['epoch'], history['mse_loss_ema'], k=3)
+        spline_kl = make_interp_spline(history['epoch'], history['kl_loss_ema'], k=3)
+        
+        fig, ax1 = plt.subplots(figsize=(9, 5))
+        color1 = '#e63946'
+        ax1.set_xlabel('Epoch', fontweight='bold')
+        ax1.set_ylabel('Reconstruction Loss (MSE)', color=color1, fontweight='bold')
+        
+        # Plot raw as very transparent
+        ax1.plot(history['epoch'], history['mse_loss'], color=color1, alpha=0.1, label='MSE (Raw)')
+        # Plot buttery smooth Spline
+        ax1.plot(epochs_smooth, spline_mse(epochs_smooth), color=color1, linewidth=3, label='MSE (Smoothed)')
+        ax1.tick_params(axis='y', labelcolor=color1)
 
-    ax2 = ax1.twinx()  
-    color2 = '#1d3557' # Dark blue
-    ax2.set_ylabel('KL Divergence', color=color2, fontweight='bold')  
-    ax2.plot(history['epoch'], history['kl_loss'], color=color2, alpha=0.2, label='KL (raw)')
-    ax2.plot(history['epoch'], history['kl_loss_smooth'], color=color2, linestyle='--', linewidth=2.5, label='KL (smoothed)')
-    ax2.tick_params(axis='y', labelcolor=color2)
+        ax2 = ax1.twinx()  
+        color2 = '#1d3557'
+        ax2.set_ylabel('KL Divergence', color=color2, fontweight='bold')  
+        ax2.plot(history['epoch'], history['kl_loss'], color=color2, alpha=0.1, label='KL (Raw)')
+        ax2.plot(epochs_smooth, spline_kl(epochs_smooth), color=color2, linestyle='-', linewidth=3, label='KL (Smoothed)')
+        ax2.tick_params(axis='y', labelcolor=color2)
 
-    # Combine legends
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=2, frameon=False)
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=2, frameon=False)
 
-    plt.title(f"Beta-VAE Training Dynamics\n(Smoothed Exponential Decay)", pad=20, fontweight='bold')
-    fig.tight_layout()  
-    plt.savefig("docs/images/training_curves.svg", bbox_inches='tight')
-    plt.savefig("docs/images/training_curves.png", dpi=300, bbox_inches='tight')
-    plt.close()
+        plt.title(f"Beta-VAE Training Dynamics\n(Perfectly Smooth Curves)", pad=20, fontweight='bold')
+        fig.tight_layout()  
+        plt.savefig("docs/images/training_curves.svg", bbox_inches='tight')
+        plt.savefig("docs/images/training_curves.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        print("Smooth curves generated.")
 
-    # --- 2. BAYESIAN SWEEP LANDSCAPE ---
-    print("Generating Bayesian HPO Sweep plot...")
+    # --- 2. PARALLEL COORDINATES PLOT (ALL PARAMETERS) ---
+    print("Generating HPO Sweep plot...")
     sweeps = api.project('vae_marketing').sweeps()
     if sweeps:
-        # Find the sweep with the most runs
         best_sweep = max(sweeps, key=lambda s: len(s.runs))
-        sweep_runs = best_sweep.runs
-        
         data = []
-        for r in sweep_runs:
+        for r in best_sweep.runs:
             if r.state == "finished" and "mse_loss" in r.summary:
-                row = {
-                    'beta': r.config.get('beta', np.nan),
-                    'latent_dim': r.config.get('latent_dim', np.nan),
-                    'learning_rate': r.config.get('learning_rate', r.config.get('lr', np.nan)),
-                    'mse_loss': r.summary['mse_loss']
-                }
-                data.append(row)
-                
+                data.append({
+                    'Latent Dim': r.config.get('latent_dim', np.nan),
+                    'Beta': r.config.get('beta', np.nan),
+                    'LR': r.config.get('learning_rate', r.config.get('lr', np.nan)),
+                    'MSE Loss': r.summary['mse_loss']
+                })
+        
         df = pd.DataFrame(data).dropna()
         if len(df) > 5:
-            fig, ax = plt.subplots(figsize=(8, 6))
+            # 2.A: Generate Interactive HTML using Plotly
+            try:
+                import plotly.express as px
+                fig = px.parallel_coordinates(
+                    df, color="MSE Loss", 
+                    dimensions=['Latent Dim', 'Beta', 'LR', 'MSE Loss'],
+                    color_continuous_scale=px.colors.diverging.Tealrose,
+                    title="Hyperparameter Search (Parallel Coordinates)"
+                )
+                fig.write_html("docs/images/sweep_parallel_coords.html")
+                print("Interactive HTML Parallel Coords saved.")
+            except ImportError:
+                print("Plotly not available for HTML export.")
             
-            # Scatter plot: latent_dim vs beta, size/color by MSE
-            # We want lower MSE to be "better" (e.g., darker/larger)
-            scatter = ax.scatter(
-                df['latent_dim'], 
-                df['beta'], 
-                c=df['mse_loss'], 
-                cmap='viridis_r', # reverse viridis so low loss is yellow/bright
-                s=100 + (df['mse_loss'].max() - df['mse_loss']) / (df['mse_loss'].max() - df['mse_loss'].min() + 1e-6) * 300,
-                alpha=0.8,
-                edgecolors='w',
-                linewidth=0.5
-            )
+            # 2.B: Generate Static Custom Matplotlib Parallel Coordinates
+            fig, axes = plt.subplots(1, 3, sharey=False, figsize=(10, 5))
+            cols = ['Latent Dim', 'Beta', 'LR', 'MSE Loss']
             
-            cbar = plt.colorbar(scatter)
+            # Normalize for plotting
+            df_norm = df.copy()
+            min_max = {}
+            for c in cols:
+                c_min, c_max = df[c].min(), df[c].max()
+                if c_max == c_min: c_max = c_min + 1e-5
+                min_max[c] = (c_min, c_max)
+                df_norm[c] = (df[c] - c_min) / (c_max - c_min)
+                
+            norm = plt.Normalize(df['MSE Loss'].min(), df['MSE Loss'].max())
+            cmap = plt.cm.viridis_r
+            
+            for i, ax in enumerate(axes):
+                for idx, row in df_norm.iterrows():
+                    ax.plot([i, i+1], [row[cols[i]], row[cols[i+1]]], c=cmap(norm(df.loc[idx, 'MSE Loss'])), alpha=0.4, linewidth=1.5)
+                
+                ax.set_xlim(i, i+1)
+                # Left y-axis ticks
+                ax.set_yticks([0, 0.5, 1])
+                ax.set_yticklabels([f"{min_max[cols[i]][0]:.3g}", f"{(min_max[cols[i]][0]+min_max[cols[i]][1])/2:.3g}", f"{min_max[cols[i]][1]:.3g}"])
+                ax.set_xticks([i])
+                ax.set_xticklabels([cols[i]], fontweight='bold')
+                
+                ax.spines['top'].set_visible(False)
+                ax.spines['bottom'].set_visible(False)
+                
+                if i == 2: # Last axis
+                    ax2 = ax.twinx()
+                    ax2.set_ylim(0, 1)
+                    ax2.set_yticks([0, 0.5, 1])
+                    ax2.set_yticklabels([f"{min_max[cols[-1]][0]:.3g}", f"{(min_max[cols[-1]][0]+min_max[cols[-1]][1])/2:.3g}", f"{min_max[cols[-1]][1]:.3g}"])
+                    ax2.spines['top'].set_visible(False)
+                    ax2.spines['bottom'].set_visible(False)
+                    ax2.spines['left'].set_visible(False)
+                    # Add title for last column as x-tick text is tricky
+                    ax.set_xticks([i, i+1])
+                    ax.set_xticklabels([cols[i], cols[i+1]], fontweight='bold')
+            
+            fig.subplots_adjust(wspace=0)
+            
+            # Add colorbar
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+            cbar = plt.colorbar(sm, ax=axes.ravel().tolist(), pad=0.1)
             cbar.set_label('Final MSE Loss (Lower is Better)', rotation=270, labelpad=15)
             
-            ax.set_xlabel('Latent Dimension Capacity', fontweight='bold')
-            ax.set_ylabel('Beta Regularization Strength', fontweight='bold')
-            ax.set_title(f"Bayesian Optimization Landscape\n(Sweep: {best_sweep.name})", pad=15, fontweight='bold')
-            
-            # Add grid and tweak look
-            ax.grid(True, linestyle='--', alpha=0.6)
-            ax.set_axisbelow(True)
-            
-            plt.tight_layout()
-            plt.savefig("docs/images/sweep_landscape.svg", bbox_inches='tight')
-            plt.savefig("docs/images/sweep_landscape.png", dpi=300, bbox_inches='tight')
+            plt.suptitle(f"Parallel Coordinates Parameter Search\n(Sweep: {best_sweep.name})", fontweight='bold', y=1.05)
+            plt.savefig("docs/images/sweep_parallel_coords.svg", bbox_inches='tight')
+            plt.savefig("docs/images/sweep_parallel_coords.png", dpi=300, bbox_inches='tight')
             plt.close()
-            print("Sweep landscape generated.")
-        else:
-            print("Not enough complete sweep runs to generate landscape.")
+            print("Static Parallel Coords generated.")
 
 if __name__ == "__main__":
     generate_plots()
