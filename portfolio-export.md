@@ -5,7 +5,7 @@ pubDate: 2026-03-18
 tags: ["PyTorch", "Beta-VAE", "Polars", "WandB", "Data Science"]
 githubUrl: "https://github.com/lexandree/vae-marketing"
 featured: true
-order: 5
+order: 1
 ---
 
 ## Problem Statement
