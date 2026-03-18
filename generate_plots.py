@@ -1,6 +1,8 @@
 import os
 import wandb
 import matplotlib.pyplot as plt
+import matplotlib.path as mpath
+import matplotlib.patches as mpatches
 import seaborn as sns
 import pandas as pd
 import numpy as np
@@ -92,7 +94,7 @@ def generate_plots():
             except ImportError:
                 print("Plotly not available for HTML export.")
             
-            # 2.B: Generate Static Custom Matplotlib Parallel Coordinates
+            # 2.B: Generate Static Custom Matplotlib Parallel Coordinates WITH SMOOTH CURVES
             fig, axes = plt.subplots(1, 3, sharey=False, figsize=(10, 5))
             cols = ['Latent Dim', 'Beta', 'LR', 'MSE Loss']
             
@@ -108,9 +110,23 @@ def generate_plots():
             norm = plt.Normalize(df['MSE Loss'].min(), df['MSE Loss'].max())
             cmap = plt.cm.viridis_r
             
+            Path = mpath.Path
+            
             for i, ax in enumerate(axes):
                 for idx, row in df_norm.iterrows():
-                    ax.plot([i, i+1], [row[cols[i]], row[cols[i+1]]], c=cmap(norm(df.loc[idx, 'MSE Loss'])), alpha=0.4, linewidth=1.5)
+                    y0 = row[cols[i]]
+                    y1 = row[cols[i+1]]
+                    x0 = i
+                    x1 = i+1
+                    
+                    # Smooth S-Curve using Bezier Control Points
+                    verts = [(x0, y0), (x0 + 0.5, y0), (x1 - 0.5, y1), (x1, y1)]
+                    codes = [Path.MOVETO, Path.CURVE4, Path.CURVE4, Path.CURVE4]
+                    path = Path(verts, codes)
+                    
+                    color = cmap(norm(df.loc[idx, 'MSE Loss']))
+                    patch = mpatches.PathPatch(path, facecolor='none', edgecolor=color, alpha=0.4, lw=1.5)
+                    ax.add_patch(patch)
                 
                 ax.set_xlim(i, i+1)
                 # Left y-axis ticks
@@ -146,7 +162,7 @@ def generate_plots():
             plt.savefig("docs/images/sweep_parallel_coords.svg", bbox_inches='tight')
             plt.savefig("docs/images/sweep_parallel_coords.png", dpi=300, bbox_inches='tight')
             plt.close()
-            print("Static Parallel Coords generated.")
+            print("Static Smooth Parallel Coords generated.")
 
 if __name__ == "__main__":
     generate_plots()
