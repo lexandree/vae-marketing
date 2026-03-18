@@ -26,11 +26,9 @@ This project applies a **Disentangled Variational Autoencoder (Beta-VAE)** to ra
 ### Training Dynamics
 The model effectively balances reconstruction fidelity (MSE Loss) with latent space regularization (KL Divergence) over a carefully tuned annealing schedule.
 
-![Training Curves](docs/images/training_curves.svg)
-![Beta Annealing](docs/images/beta_annealing.svg)
+
 
 ### Hyperparameter Search
 Bayesian search results showing the relationships between all hyperparameter choices (Latent Dimension, Beta Regularization, Learning Rate) and the final Reconstruction Loss across all runs.
 
-![Hyperparameter Search (Parallel Coordinates)](docs/images/sweep_parallel_coords.svg)
 
