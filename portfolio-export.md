@@ -28,3 +28,9 @@ The model effectively balances reconstruction fidelity (MSE Loss) with latent sp
 
 ![Training Curves](docs/images/training_curves.svg)
 ![Beta Annealing](docs/images/beta_annealing.svg)
+
+### Hyperparameter Landscape
+Bayesian search results showing the relationship between Latent Dimension, Beta Regularization, and the final Reconstruction Loss.
+
+![Hyperparameter Landscape](docs/images/sweep_landscape.svg)
+
