@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.services.reporting import rank_sensitive_categories, segment_consumers
+from src.services.reporting_baseline import rank_sensitive_categories, segment_consumers
 
 
 def test_segment_consumers() -> None:
@@ -23,7 +23,7 @@ def test_rank_sensitive_categories() -> None:
     })
 
     transactions = pd.DataFrame({
-        'household_id': ['h1', 'h2', 'h1', 'h2'],
+        'HOUSEHOLD_KEY': ['h1', 'h2', 'h1', 'h2'],
         'product_category': ['A', 'B', 'B', 'B'],
         # Assuming we track volume/value affected
     })

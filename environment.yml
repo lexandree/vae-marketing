@@ -7,8 +7,12 @@ dependencies:
   - pip
   - pandas
   - polars
+  - pyarrow
+  - fastparquet
   - scikit-learn
   - plotly
   - seaborn
   - pip:
     - torch
+    - wandb
+    - python-dotenv

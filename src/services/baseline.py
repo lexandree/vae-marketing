@@ -3,71 +3,66 @@ import logging
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 logger = logging.getLogger(__name__)
 
-def vae_loss(recon_x: torch.Tensor, x: torch.Tensor, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-    """Calculates the combined Reconstruction + KL divergence loss."""
+def vae_loss(
+    recon_x: torch.Tensor,
+    x: torch.Tensor,
+    mu: torch.Tensor,
+    logvar: torch.Tensor
+) -> torch.Tensor:
+    """Calculates the combined Reconstruction + KL divergence loss.
+    
+    Uses per-sample normalization.
+    """
     # Using MSE for reconstruction, scaled per sample
-    recon_loss = F.mse_loss(recon_x, x, reduction='sum') / x.shape[0]
+    mse_loss = nn.functional.mse_loss(recon_x, x, reduction="sum") / x.shape[0]
 
-    # KL Divergence: -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+    # KL divergence: -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
     kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
     kl_loss = torch.mean(kl_div)
 
-    return recon_loss + kl_loss
+    return mse_loss + kl_loss
+
 
 def train_baseline_vae(
-    data: pd.DataFrame, 
-    model: nn.Module, 
-    epochs: int = 50, 
-    batch_size: int = 64,
-    learning_rate: float = 1e-3,
-    min_transactions: int = 5
+    data: pd.DataFrame,
+    model: nn.Module,
+    epochs: int = 10,
+    batch_size: int = 32,
+    lr: float = 1e-3
 ) -> nn.Module:
     """Trains the VAE on historical purchase data without stimuli.
-    
-    Note: Optimization ensures this operates quickly on single household baseline 
-    training to meet the < 5s requirement.
-    
+
     Args:
         data: DataFrame containing transactions (needs to be grouped/aggregated per household).
-        model: The VAE model.        epochs: Number of training epochs.
-        batch_size: Batch size for DataLoader.
-        learning_rate: Optimizer learning rate.
-        min_transactions: Minimum transactions required for a household to be included.
+        model: The VAE model instance.
+        epochs: Number of training epochs.
+        batch_size: Size of training batches.
+        lr: Learning rate.
 
     Returns:
         The trained VAE model.
     """
-    # Validation: Filter out households with insufficient data
-    household_counts = data['household_id'].value_counts()
-    valid_households = household_counts[household_counts >= min_transactions].index
-
-    if len(valid_households) == 0:
-        logger.error("No households meet the minimum transaction threshold.")
-        raise ValueError("Insufficient historical data for all households to train baseline.")
-
-    filtered_data = data[data['household_id'].isin(valid_households)]
-    logger.info(f"Training on {len(valid_households)} valid households.")
-
-    # Preprocessing (Assume data is already aggregated to categories and temporal features per row)
-    category_cols = [c for c in filtered_data.columns if c.startswith('cat_')]
-    temporal_cols = ['month_of_year', 'week_of_year']
+    category_cols = [c for c in data.columns if c.endswith("_SPEND") or c.endswith("_QTY")]
+    temporal_cols = [c for c in data.columns if c.startswith("TEMPORAL_")]
 
     if not category_cols:
-        raise ValueError("No category columns found (expected prefix 'cat_').")
+        raise ValueError("No spend/qty features found in data for training.")
 
-    x_tensor = torch.tensor(filtered_data[category_cols].values, dtype=torch.float32)
-    t_tensor = torch.tensor(filtered_data[temporal_cols].values, dtype=torch.float32)
+    x_tensor = torch.tensor(data[category_cols].values, dtype=torch.float32)
+    t_tensor = (
+        torch.tensor(data[temporal_cols].values, dtype=torch.float32)
+        if temporal_cols
+        else torch.zeros((len(data), 1))
+    )
 
     dataset = TensorDataset(x_tensor, t_tensor)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     model.train()
     for epoch in range(epochs):
@@ -80,26 +75,38 @@ def train_baseline_vae(
             optimizer.step()
             total_loss += loss.item()
 
-        if (epoch + 1) % 10 == 0 or epoch == 0:
-            logger.info(f"Epoch {epoch+1}/{epochs} | Loss: {total_loss / len(dataset):.4f}")
+        if (epoch + 1) % 5 == 0:
+            logger.info(f"Epoch [{epoch+1}/{epochs}], Loss: {total_loss/len(dataloader):.4f}")
 
     return model
 
+
 def get_household_profile(model: nn.Module, household_data: pd.DataFrame) -> np.ndarray:
-    """Returns the latent representation (mu vector) for a given household."""
+    """Extracts the mean latent representation (mu) for a given household's history.
+
+    Args:
+        model: The trained VAE model.
+        household_data: DataFrame containing history for a single household.
+
+    Returns:
+        Numpy array representing the latent profile.
+    """
     model.eval()
 
-    category_cols = [c for c in household_data.columns if c.startswith('cat_')]
-    temporal_cols = ['month_of_year', 'week_of_year']
-
-    if not category_cols or not temporal_cols:
-        raise ValueError("Household data missing required category or temporal columns.")
+    category_cols = [
+        c for c in household_data.columns if c.endswith("_SPEND") or c.endswith("_QTY")
+    ]
+    temporal_cols = [c for c in household_data.columns if c.startswith("TEMPORAL_")]
 
     x_tensor = torch.tensor(household_data[category_cols].values, dtype=torch.float32)
-    t_tensor = torch.tensor(household_data[temporal_cols].values, dtype=torch.float32)
+    t_tensor = (
+        torch.tensor(household_data[temporal_cols].values, dtype=torch.float32)
+        if temporal_cols
+        else torch.zeros((len(household_data), 1))
+    )
 
     with torch.no_grad():
         mu, _ = model.encode(x_tensor, t_tensor)
 
-    # Return the mean latent representation if multiple rows
+    # Average the latent vectors across all time points to get a stable profile
     return mu.mean(dim=0).numpy()

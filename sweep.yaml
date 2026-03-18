@@ -1,0 +1,38 @@
+name: vae-marketing-finetuning
+project: vae_marketing
+program: main.py
+method: bayes
+metric:
+  name: loss
+  goal: minimize
+parameters:
+  latent-dim:
+    values: [64, 128, 256]
+  beta:
+    distribution: uniform
+    min: 0.1
+    max: 5.0
+  batch-size:
+    value: 1024
+  lr:
+    distribution: uniform
+    min: 0.001
+    max: 0.003
+  epochs:
+    value: 30
+  anneal-end:
+    values: [5, 10, 15]
+  arch:
+    value: "beta_vae"
+command:
+  - ${interpreter}
+  - ${program}
+  - "train"
+  - "--data"
+  - "data/processed_full/train.parquet"
+  - "--vocab"
+  - "data/processed_full/vocabulary.json"
+  - "--wandb"
+  - "--verbosity"
+  - "0"
+  - ${args}

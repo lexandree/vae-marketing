@@ -30,7 +30,7 @@ venv.bak/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-data/
+/data/
 *.csv
 *.parquet
 
@@ -50,6 +50,16 @@ data/
 *~
 
 # Work-in-progress stages
-specs/002-data-preparation/
-specs/003-disentanglement/
+
+# specs/003-disentanglement/
+
+# Experiments & artifacts
+experiments/*
+!experiments/**/config.json
+weights.pt
+
+# Temp and logs
+tmp/
+wandb/
+processed/
 
