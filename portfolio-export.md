@@ -26,8 +26,8 @@ This project applies a **Disentangled Variational Autoencoder (Beta-VAE)** to ra
 ### Training Dynamics
 The model effectively balances reconstruction fidelity (MSE Loss) with latent space regularization (KL Divergence) over a carefully tuned annealing schedule.
 
-![Training Curves](/schaufenster/assets/vae-marketing/training_curves.svg)
-![Beta Annealing](/schaufenster/assets/vae-marketing/beta_annealing.svg)
+![Training Curves](/schaufenster/assets/vae-marketing/training_curves.svg)  
+![Beta Annealing](/schaufenster/assets/vae-marketing/beta_annealing.svg)  
 
 ### Hyperparameter Search
 The following interactive chart shows the results of the Bayesian hyperparameter search. You can filter and reorder axes to explore the relationships between Latent Dimension, Beta Regularization, and Learning Rate.
@@ -35,6 +35,14 @@ The following interactive chart shows the results of the Bayesian hyperparameter
 <div class="aspect-video w-full border border-skin-line rounded-lg overflow-hidden bg-white mt-4">
   <iframe 
     src="/schaufenster/assets/vae-marketing/sweep_parallel_coords.html" 
+    class="w-full h-full border-none"
+    title="WandB Sweep Parallel Coordinates"
+  ></iframe>
+</div> 
+
+<div class="aspect-video w-full border border-skin-line rounded-lg overflow-hidden bg-white mt-4">
+  <iframe 
+    src="https://wandb.ai/andreev-al/vae_marketing/sweeps/idn2al3o/panel/xrqe8320z?nw=nwuserandreeval" 
     class="w-full h-full border-none"
     title="WandB Sweep Parallel Coordinates"
   ></iframe>
