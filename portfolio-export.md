@@ -34,7 +34,7 @@ The following interactive chart shows the results of the Bayesian hyperparameter
 
 <div class="w-full h-[400px] border border-skin-line rounded-lg overflow-hidden bg-white mt-4">
   <iframe 
-    src="https://wandb.ai/andreev-al/vae_marketing/sweeps/idn2al3o/panel/xrqe8320z?nw=nwuserandreeval" 
+    src="https://api.wandb.ai/links/andreev-al/kap3b0vl" 
     class="w-full h-full border-none"
     title="WandB Sweep Parallel Coordinates"
   ></iframe>
