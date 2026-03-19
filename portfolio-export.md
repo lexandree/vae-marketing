@@ -32,10 +32,10 @@ The model effectively balances reconstruction fidelity (MSE Loss) with latent sp
 ### Hyperparameter Search
 The following interactive chart shows the results of the Bayesian hyperparameter search. You can filter and reorder axes to explore the relationships between Latent Dimension, Beta Regularization, and Learning Rate.
 
-<div class="w-full h-[400px] border border-skin-line rounded-lg overflow-hidden bg-white mt-4">
+<div class="w-full border border-skin-line rounded-lg overflow-hidden bg-white mt-4" style="height: 400px;">
   <iframe 
     src="https://api.wandb.ai/links/andreev-al/kap3b0vl" 
-    class="w-full h-full border-none"
+    style="width: 100%; height: 100%; border: none;"
     title="WandB Sweep Parallel Coordinates"
   ></iframe>
 </div>  
