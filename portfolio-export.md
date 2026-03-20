@@ -43,3 +43,10 @@ The following interactive chart shows the results of the Bayesian hyperparameter
 *(Note: If the interactive chart above doesn't load, view the static version below)*
 
 ![Hyperparameter Search (Static)](/schaufenster/assets/vae-marketing/sweep_parallel_coords.svg)
+
+## 🔬 Ongoing Research
+
+We are actively expanding this framework to establish a new state-of-the-art (SOTA) for the reconstruction-disentanglement trade-off in behavioral modeling. 
+
+Our current research focuses on a **Combinatorial Synergy Matrix**, systematically evaluating and combining advanced regularizations from $\beta$-TCVAE, FactorVAE, DIP-VAE, and InfoVAE to isolate the optimal mathematical constraints for marketing analytics. You can view our detailed Research Roadmap in the repository's `TODO.md`.
+
