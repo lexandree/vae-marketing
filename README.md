@@ -118,4 +118,14 @@ Bayesian search results showing the relationship between Latent Dimension, Beta 
 - **Latent Deviation**: Real-world magnitude of behavior change.
 
 ---
+
+## 🔬 Ongoing Research
+
+We are actively expanding this framework to establish a new state-of-the-art (SOTA) for the reconstruction-disentanglement trade-off in behavioral modeling. 
+
+Our current research focuses on a **Combinatorial Synergy Matrix**, systematically evaluating and combining advanced regularizations from $\beta$-TCVAE, FactorVAE, DIP-VAE, and InfoVAE to isolate the optimal mathematical constraints for marketing analytics.
+
+👉 **[See our detailed Research Roadmap & TODOs](TODO.md)**
+
+---
 *Developed for Stage 003: Disentangled VAE for Marketing Impact Analysis.*
