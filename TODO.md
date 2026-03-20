@@ -18,9 +18,18 @@
   4. **InfoVAE** [[Paper](https://arxiv.org/abs/1706.02262)]
      - *Why:* Solves the "information preference" problem by explicitly maximizing mutual information, ensuring the latent codes are actually used by the decoder.
 
+- [ ] **Investigate Combinatorial Synergy (The "Matrix of Combinations")**
+  *Context: The regularizations proposed in the papers above target different parts of the objective function (e.g., Total Correlation vs. Mutual Information vs. Covariance). It is highly probable that combining some of these approaches will yield synergistic improvements, while others might conflict and degrade performance.*
+  
+  **Matrix Experiments to Run:**
+  - **$\beta$-TCVAE + InfoVAE:** Can we heavily penalize Total Correlation for disentanglement ($\beta$-TCVAE) while simultaneously forcing the decoder to maximize Mutual Information with the latent codes (InfoVAE) to prevent posterior collapse and maintain high accuracy?
+  - **FactorVAE + DIP-VAE:** Does combining adversarial TC penalty (FactorVAE) with explicit covariance diagonalization (DIP-VAE) over-regularize the latent space, or does it create the "ultimate" disentangled representation?
+  - **Ablation Studies:** Systematically turn on/off individual loss components across the combinations to isolate which mathematical constraint contributes most to the target metrics (MIG/SAP vs. MSE).
+
   **Next Steps:**
   - [ ] Implement `beta_tc_vae.py` in `src/models/`.
   - [ ] Implement `factor_vae.py` (with auxiliary discriminator) in `src/models/`.
   - [ ] Implement `dip_vae.py` and `info_vae.py` in `src/models/`.
   - [ ] Update `main.py` and `factory.py` to support `--arch tc_vae`, `--arch factor_vae`, `--arch dip_vae`, and `--arch info_vae`.
-  - [ ] Run a WandB sweep comparing all variants across identical latent dimensions to measure the Pareto frontier improvement (MSE vs MIG).
+  - [ ] **Implement a flexible `--loss-components` argument** in the trainer to dynamically toggle TC-penalty, MI-maximization, and Covariance-diagonalization within a single model run.
+  - [ ] Run a WandB sweep comparing all variants **and their combinations** across identical latent dimensions to measure the Pareto frontier improvement (MSE vs MIG).
