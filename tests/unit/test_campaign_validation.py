@@ -47,7 +47,7 @@ def test_compute_campaign_effects_uses_primary_outcomes() -> None:
         }
     )
 
-    effects_df, diagnostics_df, event_study_df = compute_campaign_effects(
+    effects_df, diagnostics_df, event_study_df, balance_details_df, cohort_summary_df = compute_campaign_effects(
         analysis_df=analysis_df,
         campaign_ids=[18],
         outcomes=None,
@@ -59,6 +59,8 @@ def test_compute_campaign_effects_uses_primary_outcomes() -> None:
     assert effects_df["evidence_classification"].notna().all()
     assert not diagnostics_df.empty
     assert not event_study_df.empty
+    assert not balance_details_df.empty
+    assert not cohort_summary_df.empty
 
 
 def test_compute_campaign_effects_supports_propensity_matching() -> None:
@@ -87,7 +89,7 @@ def test_compute_campaign_effects_supports_propensity_matching() -> None:
         }
     )
 
-    effects_df, diagnostics_df, _ = compute_campaign_effects(
+    effects_df, diagnostics_df, _, _, cohort_summary_df = compute_campaign_effects(
         analysis_df=analysis_df,
         campaign_ids=[26],
         outcomes=["total_spend"],
@@ -100,3 +102,4 @@ def test_compute_campaign_effects_supports_propensity_matching() -> None:
     assert not effects_df.empty
     assert not diagnostics_df.empty
     assert diagnostics_df["matching_method"].eq("propensity").all()
+    assert cohort_summary_df["matched_treated_size"].iloc[0] >= 1

@@ -144,11 +144,61 @@ This command writes:
 - `data/validation/validation_attributes.parquet`
 - `data/validation/dataset_summary.json`
 
+To validate campaign effects with restricted quasi-causal controls:
+
+```bash
+PYTHONPATH=. python3 main.py validate-campaigns \
+    --analysis-data data/validation/campaign_analysis.parquet \
+    --campaign-ids 26 30 \
+    --method matched-did \
+    --output-dir data/validation/restricted \
+    --matching-method propensity \
+    --propensity-caliper 0.02
+```
+
+This command writes:
+
+- `campaign_effects.json`
+- `campaign_diagnostics.json`
+- `campaign_event_study.parquet`
+- `campaign_balance_details.json`
+- `campaign_cohort_summary.json`
+
+To test sensitivity of the campaign findings to event-window size:
+
+```bash
+PYTHONPATH=. python3 main.py analyze-campaign-sensitivity \
+    --transactions data/transaction_data.csv \
+    --products data/product.csv \
+    --campaign-table data/campaign_table.csv \
+    --campaign-desc data/campaign_desc.csv \
+    --coupon data/coupon.csv \
+    --coupon-redempt data/coupon_redempt.csv \
+    --demographics data/hh_demographic.csv \
+    --campaign-ids 26 30 \
+    --weeks-grid 2 3 4 5 \
+    --output-dir data/campaign_sensitivity \
+    --matching-methods propensity \
+    --propensity-calipers 0.02
+```
+
+To connect validated latent mappings to campaign-visible attribute shifts:
+
+```bash
+PYTHONPATH=. python3 main.py build-campaign-latent-bridge \
+    --campaign-results data/restricted_26_w2/restricted/campaign_effects.json \
+    --factor-mappings data/test_smoke/latent_smoke_100/out_fast_32/factor_mappings.json \
+    --attributes data/restricted_26_w2/validation_attributes.parquet \
+    --output-dir data/restricted_26_w2/latent_bridge \
+    --top-k-attributes 5
+```
+
 ## Reproducibility Notes
 
 - Validation commands support explicit `--seed` values for deterministic cohort construction where possible.
 - Campaign evidence in this repository should be interpreted as quasi-causal, not randomized causal proof.
 - Latent-factor labels should only be used when the workflow marks their mappings as validated.
+- Restricted campaign validation is currently most promising for campaigns `26` and `30`, not for every campaign in the dataset. Current sensitivity runs favor `26` with `2-4` week windows and `30` with `3-5` week windows.
 
 ## Metrics & Validation
 - **MIG (Mutual Information Gap)**: Measures latent factor independence.

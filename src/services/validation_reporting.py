@@ -21,6 +21,8 @@ def serialize_campaign_validation_outputs(
     effects_df: pd.DataFrame,
     diagnostics_df: pd.DataFrame,
     event_study_df: pd.DataFrame,
+    balance_details_df: pd.DataFrame | None = None,
+    cohort_summary_df: pd.DataFrame | None = None,
 ) -> None:
     """Write campaign validation outputs in report-ready form."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -30,6 +32,16 @@ def serialize_campaign_validation_outputs(
         diagnostics_df.to_dict(orient="records"),
     )
     event_study_df.to_parquet(output_dir / "campaign_event_study.parquet", index=False)
+    if balance_details_df is not None:
+        write_json_artifact(
+            output_dir / "campaign_balance_details.json",
+            balance_details_df.to_dict(orient="records"),
+        )
+    if cohort_summary_df is not None:
+        write_json_artifact(
+            output_dir / "campaign_cohort_summary.json",
+            cohort_summary_df.to_dict(orient="records"),
+        )
 
 
 def serialize_latent_validation_outputs(

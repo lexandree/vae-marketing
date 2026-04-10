@@ -18,6 +18,8 @@ from src.data.dataset import load_validation_source
 from src.models.beta_vae import beta_vae_loss
 from src.models.factory import ModelFactory
 from src.services.baseline import get_household_profile, vae_loss
+from src.services.campaign_latent_bridge import build_campaign_latent_bridge
+from src.services.campaign_sensitivity import run_campaign_sensitivity
 from src.services.campaign_validation import validate_campaign_effects
 from src.services.impact_analysis import (
     analyze_persistence,
@@ -325,6 +327,11 @@ def validate_campaigns_command(args: argparse.Namespace) -> None:
     validate_campaign_effects(args=args)
 
 
+def analyze_campaign_sensitivity_command(args: argparse.Namespace) -> None:
+    """Run reproducible sensitivity analysis for campaign validation."""
+    run_campaign_sensitivity(args=args)
+
+
 def validate_latents_command(args: argparse.Namespace) -> None:
     """Run latent-factor validation."""
     validate_latent_factors(args=args)
@@ -333,6 +340,11 @@ def validate_latents_command(args: argparse.Namespace) -> None:
 def generate_validation_report_command(args: argparse.Namespace) -> None:
     """Generate the final validation report."""
     generate_validation_report(args=args)
+
+
+def build_campaign_latent_bridge_command(args: argparse.Namespace) -> None:
+    """Connect campaign shifts to validated latent mappings."""
+    build_campaign_latent_bridge(args=args)
 
 
 def main() -> None:
@@ -405,6 +417,26 @@ def main() -> None:
     validate_campaigns_parser.add_argument("--propensity-caliper", type=float, default=0.02)
     validate_campaigns_parser.add_argument("--seed", type=int, default=42)
 
+    sensitivity_parser = subparsers.add_parser(
+        "analyze-campaign-sensitivity",
+        help="Run a sensitivity grid for campaign validation",
+    )
+    sensitivity_parser.add_argument("--transactions", type=Path, required=True)
+    sensitivity_parser.add_argument("--products", type=Path, required=True)
+    sensitivity_parser.add_argument("--campaign-table", type=Path, required=True)
+    sensitivity_parser.add_argument("--campaign-desc", type=Path, required=True)
+    sensitivity_parser.add_argument("--coupon", type=Path, required=True)
+    sensitivity_parser.add_argument("--coupon-redempt", type=Path, required=True)
+    sensitivity_parser.add_argument("--demographics", type=Path, default=None)
+    sensitivity_parser.add_argument("--campaign-ids", type=int, nargs="+", required=True)
+    sensitivity_parser.add_argument("--weeks-grid", type=int, nargs="+", required=True)
+    sensitivity_parser.add_argument("--output-dir", type=Path, required=True)
+    sensitivity_parser.add_argument("--outcomes", nargs="*", default=None)
+    sensitivity_parser.add_argument("--matching-methods", nargs="*", default=["propensity"])
+    sensitivity_parser.add_argument("--propensity-calipers", type=float, nargs="*", default=[0.02])
+    sensitivity_parser.add_argument("--min-treated", type=int, default=30)
+    sensitivity_parser.add_argument("--min-comparison", type=int, default=30)
+
     validate_latents_parser = subparsers.add_parser(
         "validate-latents",
         help="Validate latent-factor semantics",
@@ -437,6 +469,16 @@ def main() -> None:
         default="sklearn",
     )
 
+    latent_bridge_parser = subparsers.add_parser(
+        "build-campaign-latent-bridge",
+        help="Connect campaign attribute shifts to validated latent mappings",
+    )
+    latent_bridge_parser.add_argument("--campaign-results", type=Path, required=True)
+    latent_bridge_parser.add_argument("--factor-mappings", type=Path, required=True)
+    latent_bridge_parser.add_argument("--attributes", type=Path, required=True)
+    latent_bridge_parser.add_argument("--output-dir", type=Path, required=True)
+    latent_bridge_parser.add_argument("--top-k-attributes", type=int, default=5)
+
     validation_report_parser = subparsers.add_parser(
         "generate-validation-report",
         help="Generate the validation research report",
@@ -458,8 +500,12 @@ def main() -> None:
         build_validation_data_command(args)
     elif args.command == "validate-campaigns":
         validate_campaigns_command(args)
+    elif args.command == "analyze-campaign-sensitivity":
+        analyze_campaign_sensitivity_command(args)
     elif args.command == "validate-latents":
         validate_latents_command(args)
+    elif args.command == "build-campaign-latent-bridge":
+        build_campaign_latent_bridge_command(args)
     elif args.command == "generate-validation-report":
         generate_validation_report_command(args)
 

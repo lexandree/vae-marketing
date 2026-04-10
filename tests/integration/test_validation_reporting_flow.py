@@ -56,6 +56,8 @@ def test_validate_campaigns_cli_generates_expected_artifacts(
     assert (out_dir / "campaign_effects.json").exists()
     assert (out_dir / "campaign_diagnostics.json").exists()
     assert (out_dir / "campaign_event_study.parquet").exists()
+    assert (out_dir / "campaign_balance_details.json").exists()
+    assert (out_dir / "campaign_cohort_summary.json").exists()
 
     with open(out_dir / "campaign_effects.json", "r") as f:
         effects = json.load(f)

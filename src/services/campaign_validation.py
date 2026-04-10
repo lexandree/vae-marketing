@@ -151,7 +151,7 @@ def compute_campaign_effects(
     min_comparison: int,
     matching_method: str = "none",
     propensity_caliper: float = 0.02,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Compute campaign effects, diagnostics, and event-study summaries.
 
     In restricted mode this function becomes more selective:
@@ -165,13 +165,31 @@ def compute_campaign_effects(
     effect_rows: list[dict[str, object]] = []
     diagnostic_rows: list[dict[str, object]] = []
     event_rows: list[dict[str, object]] = []
+    balance_rows: list[dict[str, object]] = []
+    cohort_rows: list[dict[str, object]] = []
 
     for campaign_id in campaign_ids:
         campaign_df = analysis_df[analysis_df["CAMPAIGN"] == campaign_id].copy()
+        raw_treated_df = campaign_df[campaign_df["treatment_status"] == "treated"].copy()
+        raw_comparison_df = campaign_df[campaign_df["treatment_status"] == "comparison"].copy()
         treated_df, comparison_df = _prepare_restricted_cohorts(
             campaign_df,
             matching_method=matching_method,
             propensity_caliper=propensity_caliper,
+        )
+        cohort_rows.append(
+            {
+                "CAMPAIGN": campaign_id,
+                "matching_method": matching_method,
+                "raw_treated_size": len(raw_treated_df),
+                "raw_comparison_size": len(raw_comparison_df),
+                "matched_treated_size": len(treated_df),
+                "matched_comparison_size": len(comparison_df),
+                "matched_retention_rate": (
+                    float(len(treated_df)) / float(len(raw_treated_df))
+                    if len(raw_treated_df) > 0 else 0.0
+                ),
+            }
         )
 
         for outcome_name in selected_outcomes:
@@ -186,12 +204,21 @@ def compute_campaign_effects(
             balance_df = summarize_balance(
                 treated_df,
                 comparison_df,
-                [f"pre_{outcome_name}"],
+                [column for column in DEFAULT_MATCHING_COVARIATES if column in campaign_df.columns],
             )
             balance_pass = (
                 not balance_df.empty
                 and balance_df["balance_status"].eq("balanced").all()
             )
+            if not balance_df.empty:
+                for row in balance_df.to_dict(orient="records"):
+                    balance_rows.append(
+                        {
+                            "CAMPAIGN": campaign_id,
+                            "outcome_name": outcome_name,
+                            **row,
+                        }
+                    )
 
             placebo_effect = float(
                 treated_df[f"post_{outcome_name}"].mean() - comparison_df[f"post_{outcome_name}"].mean()
@@ -248,13 +275,15 @@ def compute_campaign_effects(
                 f"Evidence label coverage dropped below the required threshold: {completeness:.2f}"
             )
 
-    return effects_df, diagnostics_df, event_study_df
+    balance_details_df = pd.DataFrame(balance_rows)
+    cohort_summary_df = pd.DataFrame(cohort_rows)
+    return effects_df, diagnostics_df, event_study_df, balance_details_df, cohort_summary_df
 
 
 def validate_campaign_effects(*, args: Any) -> None:
     """Run campaign validation and diagnostics from CLI arguments."""
     analysis_df = pd.read_parquet(args.analysis_data)
-    effects_df, diagnostics_df, event_study_df = compute_campaign_effects(
+    effects_df, diagnostics_df, event_study_df, balance_details_df, cohort_summary_df = compute_campaign_effects(
         analysis_df=analysis_df,
         campaign_ids=args.campaign_ids,
         outcomes=args.outcomes,
@@ -264,7 +293,14 @@ def validate_campaign_effects(*, args: Any) -> None:
         propensity_caliper=getattr(args, "propensity_caliper", 0.02),
     )
     output_dir = Path(args.output_dir)
-    serialize_campaign_validation_outputs(output_dir, effects_df, diagnostics_df, event_study_df)
+    serialize_campaign_validation_outputs(
+        output_dir,
+        effects_df,
+        diagnostics_df,
+        event_study_df,
+        balance_details_df=balance_details_df,
+        cohort_summary_df=cohort_summary_df,
+    )
 
     print("\n" + "=" * 50 + "\nCAMPAIGN VALIDATION SUMMARY\n" + "=" * 50)
     print(f"Campaigns: {list(args.campaign_ids)}")

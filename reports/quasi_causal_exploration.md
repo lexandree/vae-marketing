@@ -258,6 +258,114 @@ Interpretation:
 
 - `13` and `8` should be dropped from the quasi-causal path in the current design.
 
+## Restricted Event-Time Designs
+
+The next step narrowed the analysis windows and required propensity matching
+with a caliper. This design is intentionally stricter:
+
+- shorter `pre` and `post` windows
+- only households with complete windows
+- propensity-based `1:1` matching
+- `caliper = 0.02`
+
+Reproducible command pattern:
+
+```bash
+python main.py build-validation-data ... --campaign-ids 26 --pre-weeks 2 --post-weeks 2
+python main.py validate-campaigns ... --campaign-ids 26 --matching-method propensity --propensity-caliper 0.02
+```
+
+### Campaign 26 Restricted Results
+
+Artifacts:
+
+- `data/restricted_26_w2/`
+- `data/restricted_26_w2/restricted/`
+
+Result:
+
+- `total_spend`: `supported`
+- `trip_count`: `supported`
+- `category_diversity`: `supported`
+- `promo_share`: `supported`
+
+Interpretation:
+
+- this is the strongest quasi-causal candidate found so far
+- the important change was not just matching, but matching plus shorter windows
+
+### Campaign 30 Restricted Results
+
+Artifacts:
+
+- `data/restricted_30_w4/`
+- `data/restricted_30_w4/restricted/`
+
+Result:
+
+- `total_spend`: `supported`
+- `trip_count`: `weak`
+- `category_diversity`: `supported`
+- `promo_share`: `supported`
+
+Interpretation:
+
+- campaign `30` also improves substantially under restricted windows
+- `trip_count` remains the least stable outcome
+
+## Sensitivity Summary
+
+Source artifacts:
+
+- `data/sensitivity_quick/`
+- `data/sensitivity_campaign_26/`
+- `data/sensitivity_campaign_30/`
+
+### Campaign 26
+
+- `2 weeks`: all three primary business outcomes supported
+- `4 weeks`: all three primary business outcomes supported
+- retention rises from about `0.77` to `0.89` as the window expands
+- worst pre-period `SMD` remains below `0.09`
+
+Interpretation:
+
+- `26` looks stable across nearby restricted windows
+- this is a better basis for a quasi-causal narrative than a single hand-picked run
+
+### Campaign 30
+
+- `3 weeks`: all three primary business outcomes supported
+- `4 weeks`: `total_spend` and `category_diversity` supported, `trip_count` weak
+- `5 weeks`: all three primary business outcomes supported
+
+Interpretation:
+
+- `30` remains viable, but `trip_count` is sensitive to the event-window choice
+- claims should be phrased per outcome, not per campaign as a whole
+
+## Campaign-Latent Bridge
+
+Source artifacts:
+
+- `data/restricted_26_w2/latent_bridge/`
+- `data/restricted_30_w4/latent_bridge/`
+
+Validated overlap found so far:
+
+- campaign `26`:
+  - `total_spend` shift aligns with validated latent `25`
+  - `category_diversity` shift aligns with validated latent `23`
+- campaign `30`:
+  - `total_spend` shift aligns with validated latent `25`
+  - `category_diversity` shift aligns with validated latent `23`
+
+Interpretation:
+
+- the latent model is not just producing abstract dimensions
+- for the two strongest restricted campaign cases, the largest observable
+  behavioral shifts overlap with previously validated latent factors
+
 ## Caliper Matching For The Best Candidates
 
 Additional caliper matching was tested for campaigns `26` and `30`.
