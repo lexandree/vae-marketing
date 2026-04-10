@@ -10,15 +10,23 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
+from src.data.campaign_dataset import (
+    build_campaign_analysis_dataset,
+    write_validation_artifacts,
+)
+from src.data.dataset import load_validation_source
 from src.models.beta_vae import beta_vae_loss
 from src.models.factory import ModelFactory
 from src.services.baseline import get_household_profile, vae_loss
+from src.services.campaign_validation import validate_campaign_effects
 from src.services.impact_analysis import (
     analyze_persistence,
     calculate_deviation,
     categorize_shift,
 )
+from src.services.latent_validation import validate_latent_factors
 from src.services.reporting_baseline import generate_aggregate_report
+from src.services.validation_reporting import generate_validation_report
 from src.utils.metrics import setup_logger
 from src.utils.seed import set_seed
 from src.utils.wandb_logger import finish_logging, init_wandb, log_metrics, save_artifact
@@ -262,6 +270,71 @@ def compare_command(args: argparse.Namespace) -> None:
     print("=" * 50 + "\n")
 
 
+def build_validation_data_command(args: argparse.Namespace) -> None:
+    """Build the campaign validation dataset."""
+    transactions = load_validation_source(args.transactions, "transactions")
+    products = load_validation_source(args.products, "products")
+    campaign_table = load_validation_source(args.campaign_table, "campaign_table")
+    campaign_desc = load_validation_source(args.campaign_desc, "campaign_desc")
+    coupon = load_validation_source(args.coupon, "coupon")
+    coupon_redempt = load_validation_source(args.coupon_redempt, "coupon_redempt")
+    demographics = (
+        load_validation_source(args.demographics, "demographics")
+        if args.demographics is not None
+        else None
+    )
+    causal_data = (
+        load_validation_source(args.causal_data, "causal_data")
+        if args.causal_data is not None
+        else None
+    )
+
+    analysis_df, comparison_df, attributes_df, summary = build_campaign_analysis_dataset(
+        transactions=transactions,
+        products=products,
+        campaign_table=campaign_table,
+        campaign_desc=campaign_desc,
+        coupon=coupon,
+        coupon_redempt=coupon_redempt,
+        demographics=demographics,
+        causal_data=causal_data,
+        campaign_ids=args.campaign_ids,
+        pre_weeks=args.pre_weeks,
+        post_weeks=args.post_weeks,
+    )
+    write_validation_artifacts(
+        args.output_dir,
+        analysis_df,
+        comparison_df,
+        attributes_df,
+        summary,
+    )
+
+    print("\n" + "=" * 50 + "\nVALIDATION DATASET SUMMARY\n" + "=" * 50)
+    print(f"Campaigns: {summary['selected_campaigns']}")
+    print(f"Analysis records: {summary['analysis_records']}")
+    print(f"Treated records: {summary['treated_records']}")
+    print(f"Comparison records: {summary['comparison_records']}")
+    print(f"Validation attribute rows: {summary['validation_attribute_rows']}")
+    print(f"Artifacts saved to: {args.output_dir}")
+    print("=" * 50 + "\n")
+
+
+def validate_campaigns_command(args: argparse.Namespace) -> None:
+    """Run quasi-causal campaign validation."""
+    validate_campaign_effects(args=args)
+
+
+def validate_latents_command(args: argparse.Namespace) -> None:
+    """Run latent-factor validation."""
+    validate_latent_factors(args=args)
+
+
+def generate_validation_report_command(args: argparse.Namespace) -> None:
+    """Generate the final validation report."""
+    generate_validation_report(args=args)
+
+
 def main() -> None:
     """Main entry point for the CLI."""
     parser = argparse.ArgumentParser(description="VAE Marketing Impact Analysis")
@@ -294,6 +367,86 @@ def main() -> None:
     compare_parser = subparsers.add_parser("compare", help="Compare across Run-IDs")
     compare_parser.add_argument("run_ids", nargs="+")
 
+    build_validation_parser = subparsers.add_parser(
+        "build-validation-data",
+        help="Build campaign-linked validation datasets",
+    )
+    build_validation_parser.add_argument("--transactions", type=Path, required=True)
+    build_validation_parser.add_argument("--products", type=Path, required=True)
+    build_validation_parser.add_argument("--campaign-table", type=Path, required=True)
+    build_validation_parser.add_argument("--campaign-desc", type=Path, required=True)
+    build_validation_parser.add_argument("--coupon", type=Path, required=True)
+    build_validation_parser.add_argument("--coupon-redempt", type=Path, required=True)
+    build_validation_parser.add_argument("--demographics", type=Path, default=None)
+    build_validation_parser.add_argument("--causal-data", type=Path, default=None)
+    build_validation_parser.add_argument("--campaign-ids", type=int, nargs="+", required=True)
+    build_validation_parser.add_argument("--output-dir", type=Path, required=True)
+    build_validation_parser.add_argument("--pre-weeks", type=int, default=8)
+    build_validation_parser.add_argument("--post-weeks", type=int, default=8)
+    build_validation_parser.add_argument("--seed", type=int, default=42)
+
+    validate_campaigns_parser = subparsers.add_parser(
+        "validate-campaigns",
+        help="Validate campaign effects with quasi-causal diagnostics",
+    )
+    validate_campaigns_parser.add_argument("--analysis-data", type=Path, required=True)
+    validate_campaigns_parser.add_argument("--campaign-ids", type=int, nargs="+", required=True)
+    validate_campaigns_parser.add_argument("--method", type=str, required=True)
+    validate_campaigns_parser.add_argument("--output-dir", type=Path, required=True)
+    validate_campaigns_parser.add_argument("--outcomes", nargs="*", default=None)
+    validate_campaigns_parser.add_argument("--min-treated", type=int, default=30)
+    validate_campaigns_parser.add_argument("--min-comparison", type=int, default=30)
+    validate_campaigns_parser.add_argument(
+        "--matching-method",
+        type=str,
+        choices=["none", "propensity"],
+        default="none",
+    )
+    validate_campaigns_parser.add_argument("--propensity-caliper", type=float, default=0.02)
+    validate_campaigns_parser.add_argument("--seed", type=int, default=42)
+
+    validate_latents_parser = subparsers.add_parser(
+        "validate-latents",
+        help="Validate latent-factor semantics",
+    )
+    validate_latents_parser.add_argument("--analysis-data", type=Path, required=True)
+    validate_latents_parser.add_argument("--attributes", type=Path, required=True)
+    validate_latents_parser.add_argument("--run-ids", nargs="+", required=True)
+    validate_latents_parser.add_argument("--output-dir", type=Path, required=True)
+    validate_latents_parser.add_argument("--model-types", nargs="*", default=None)
+    validate_latents_parser.add_argument("--holdout-split", type=str, default="validation")
+    validate_latents_parser.add_argument("--seeds", type=int, nargs="*", default=None)
+    validate_latents_parser.add_argument("--top-k-attributes", type=int, default=5)
+    validate_latents_parser.add_argument(
+        "--mig-method",
+        type=str,
+        choices=["sklearn", "binned"],
+        default="sklearn",
+    )
+    validate_latents_parser.add_argument("--mig-bins", type=int, default=16)
+    validate_latents_parser.add_argument(
+        "--mig-binning",
+        type=str,
+        choices=["quantile", "uniform"],
+        default="quantile",
+    )
+    validate_latents_parser.add_argument(
+        "--sap-method",
+        type=str,
+        choices=["sklearn", "vectorized"],
+        default="sklearn",
+    )
+
+    validation_report_parser = subparsers.add_parser(
+        "generate-validation-report",
+        help="Generate the validation research report",
+    )
+    validation_report_parser.add_argument("--campaign-results", type=Path, required=True)
+    validation_report_parser.add_argument("--campaign-diagnostics", type=Path, required=True)
+    validation_report_parser.add_argument("--latent-results", type=Path, required=True)
+    validation_report_parser.add_argument("--latent-metrics", type=Path, required=True)
+    validation_report_parser.add_argument("--output", type=Path, required=True)
+
     args = parser.parse_args()
     if args.command == "train":
         train_command(args)
@@ -301,6 +454,14 @@ def main() -> None:
         infer_command(args)
     elif args.command == "compare":
         compare_command(args)
+    elif args.command == "build-validation-data":
+        build_validation_data_command(args)
+    elif args.command == "validate-campaigns":
+        validate_campaigns_command(args)
+    elif args.command == "validate-latents":
+        validate_latents_command(args)
+    elif args.command == "generate-validation-report":
+        generate_validation_report_command(args)
 
 
 if __name__ == "__main__":

@@ -111,6 +111,45 @@ Bayesian search results showing the relationship between Latent Dimension, Beta 
 - `specs/`: Technical specifications for each development stage.
 - `experiments/`: Artifacts, configs, and JSON reports for every run.
 
+## Validation Workflow
+
+An evidence-oriented validation workflow is being added under `specs/004-campaign-impact-validation/`.
+The planned outputs are written to:
+
+- `data/validation/` for campaign-linked analytic datasets
+- `experiments/campaign_validation/` for quasi-causal campaign diagnostics
+- `experiments/latent_validation/` for latent-factor validation artifacts
+- `reports/validation_report.md` for the final research summary
+
+To build the campaign-linked validation dataset:
+
+```bash
+PYTHONPATH=. python3 main.py build-validation-data \
+    --transactions data/transaction_data.csv \
+    --products data/product.csv \
+    --campaign-table data/campaign_table.csv \
+    --campaign-desc data/campaign_desc.csv \
+    --coupon data/coupon.csv \
+    --coupon-redempt data/coupon_redempt.csv \
+    --demographics data/hh_demographic.csv \
+    --causal-data data/causal_data.csv \
+    --campaign-ids 18 13 8 \
+    --output-dir data/validation
+```
+
+This command writes:
+
+- `data/validation/campaign_analysis.parquet`
+- `data/validation/comparison_pool.parquet`
+- `data/validation/validation_attributes.parquet`
+- `data/validation/dataset_summary.json`
+
+## Reproducibility Notes
+
+- Validation commands support explicit `--seed` values for deterministic cohort construction where possible.
+- Campaign evidence in this repository should be interpreted as quasi-causal, not randomized causal proof.
+- Latent-factor labels should only be used when the workflow marks their mappings as validated.
+
 ## Metrics & Validation
 - **MIG (Mutual Information Gap)**: Measures latent factor independence.
 - **SAP (Separated Attribute Predictability)**: Validates factor-to-attribute alignment.
