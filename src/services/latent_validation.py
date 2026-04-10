@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 
+from src.data.splits import filter_households, household_ids_for_role, load_household_splits
 from src.models.factory import ModelFactory
 from src.services.validation_reporting import serialize_latent_validation_outputs
 from src.utils.metrics import calculate_mig_with_method, calculate_sap_with_method
@@ -257,6 +258,12 @@ def validate_latent_factors(*, args: Any) -> None:
     """Run latent-factor validation against observed attributes."""
     analysis_df = pd.read_parquet(args.analysis_data)
     attributes_df = pd.read_parquet(args.attributes)
+    if getattr(args, "household_splits", None) is not None:
+        splits = load_household_splits(args.household_splits)
+        split_role = getattr(args, "split_role", "eval")
+        allowed_households = household_ids_for_role(splits, split_role)
+        analysis_df = filter_households(analysis_df, allowed_households)
+        attributes_df = filter_households(attributes_df, allowed_households)
     run_dirs = [Path(run_id) if Path(run_id).exists() else Path("experiments") / run_id for run_id in args.run_ids]
 
     metrics_rows, mapping_rows, stability_rows = validate_latent_runs(

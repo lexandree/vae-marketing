@@ -15,6 +15,8 @@ from src.data.campaign_dataset import (
     write_validation_artifacts,
 )
 from src.data.dataset import load_validation_source
+from src.data.splits import build_household_splits, write_household_splits
+from src.data.window_validation import build_and_write_window_attributes
 from src.models.beta_vae import beta_vae_loss
 from src.models.factory import ModelFactory
 from src.services.baseline import get_household_profile, vae_loss
@@ -322,6 +324,31 @@ def build_validation_data_command(args: argparse.Namespace) -> None:
     print("=" * 50 + "\n")
 
 
+def build_household_splits_command(args: argparse.Namespace) -> None:
+    """Build a leakage-resistant household split file."""
+    campaign_table = load_validation_source(args.campaign_table, "campaign_table")
+    splits = build_household_splits(
+        campaign_table=campaign_table,
+        eval_campaign_ids=args.eval_campaign_ids,
+        seed=args.seed,
+    )
+    output_path = Path(args.output)
+    write_household_splits(splits, output_path)
+
+    print("\n" + "=" * 50 + "\nHOUSEHOLD SPLIT SUMMARY\n" + "=" * 50)
+    print(f"Eval campaigns: {splits['eval_campaign_ids']}")
+    print(f"Train households: {len(splits['train_households'])}")
+    print(f"Validation households: {len(splits['validation_households'])}")
+    print(f"Eval households: {len(splits['eval_households'])}")
+    print(f"Split file saved to: {output_path}")
+    print("=" * 50 + "\n")
+
+
+def build_window_attributes_command(args: argparse.Namespace) -> None:
+    """Build window-aligned observable attributes for latent validation."""
+    build_and_write_window_attributes(args=args)
+
+
 def validate_campaigns_command(args: argparse.Namespace) -> None:
     """Run quasi-causal campaign validation."""
     validate_campaign_effects(args=args)
@@ -397,6 +424,24 @@ def main() -> None:
     build_validation_parser.add_argument("--post-weeks", type=int, default=8)
     build_validation_parser.add_argument("--seed", type=int, default=42)
 
+    split_parser = subparsers.add_parser(
+        "build-household-splits",
+        help="Build leakage-resistant household splits for representation models",
+    )
+    split_parser.add_argument("--campaign-table", type=Path, required=True)
+    split_parser.add_argument("--eval-campaign-ids", type=int, nargs="+", required=True)
+    split_parser.add_argument("--output", type=Path, required=True)
+    split_parser.add_argument("--seed", type=int, default=42)
+
+    window_attr_parser = subparsers.add_parser(
+        "build-window-attributes",
+        help="Build observable attributes aligned to prepared household windows",
+    )
+    window_attr_parser.add_argument("--transactions", type=Path, required=True)
+    window_attr_parser.add_argument("--products", type=Path, required=True)
+    window_attr_parser.add_argument("--prepared-data", type=Path, required=True)
+    window_attr_parser.add_argument("--output", type=Path, required=True)
+
     validate_campaigns_parser = subparsers.add_parser(
         "validate-campaigns",
         help="Validate campaign effects with quasi-causal diagnostics",
@@ -445,6 +490,13 @@ def main() -> None:
     validate_latents_parser.add_argument("--attributes", type=Path, required=True)
     validate_latents_parser.add_argument("--run-ids", nargs="+", required=True)
     validate_latents_parser.add_argument("--output-dir", type=Path, required=True)
+    validate_latents_parser.add_argument("--household-splits", type=Path, default=None)
+    validate_latents_parser.add_argument(
+        "--split-role",
+        type=str,
+        choices=["train", "validation", "eval", "all"],
+        default="eval",
+    )
     validate_latents_parser.add_argument("--model-types", nargs="*", default=None)
     validate_latents_parser.add_argument("--holdout-split", type=str, default="validation")
     validate_latents_parser.add_argument("--seeds", type=int, nargs="*", default=None)
@@ -498,6 +550,10 @@ def main() -> None:
         compare_command(args)
     elif args.command == "build-validation-data":
         build_validation_data_command(args)
+    elif args.command == "build-household-splits":
+        build_household_splits_command(args)
+    elif args.command == "build-window-attributes":
+        build_window_attributes_command(args)
     elif args.command == "validate-campaigns":
         validate_campaigns_command(args)
     elif args.command == "analyze-campaign-sensitivity":

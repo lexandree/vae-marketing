@@ -19,6 +19,7 @@ from src.data.normalizers import (
     save_scaler_params,
     transform_features,
 )
+from src.data.splits import filter_households, household_ids_for_role, load_household_splits
 from src.utils.seed import set_seed
 
 # Configure logging
@@ -89,6 +90,19 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=42,
         help="Random seed for reproducibility",
+    )
+    parser.add_argument(
+        "--household-splits",
+        type=Path,
+        default=None,
+        help="Optional path to household_splits.json for leakage-resistant filtering",
+    )
+    parser.add_argument(
+        "--split-role",
+        type=str,
+        choices=["train", "validation", "eval", "all"],
+        default="all",
+        help="Which household split to keep when --household-splits is provided",
     )
 
     return parser.parse_args()
@@ -166,6 +180,17 @@ def main() -> None:
         logger.info("Extracting features with 7-day rolling window...")
         features_df = extract_features(transactions, products, vocabulary=vocabulary)
         logger.info(f"Extracted features shape: {features_df.shape}")
+
+        if args.household_splits is not None:
+            splits = load_household_splits(args.household_splits)
+            allowed_households = household_ids_for_role(splits, args.split_role)
+            logger.info(
+                "Filtering features by household split role '%s' (%s households)...",
+                args.split_role,
+                len(allowed_households),
+            )
+            features_df = filter_households(features_df, allowed_households)
+            logger.info(f"Features shape after split filtering: {features_df.shape}")
 
         if len(features_df) == 0:
             logger.warning("No features extracted. Exiting.")

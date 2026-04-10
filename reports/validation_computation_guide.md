@@ -13,6 +13,14 @@ The current validation workflow has four layers:
 3. test sensitivity to window size and matching restrictions
 4. connect campaign-visible shifts to validated latent factors
 
+For final reporting, latent results should come from a leakage-controlled
+protocol:
+
+1. hold out case-study campaigns such as `26` and `30`
+2. exclude households from those campaigns out of representation training
+3. retrain the representation model on the remaining household universe
+4. validate latent mappings only on eval households
+
 The corresponding CLI commands are:
 
 ```bash
@@ -208,6 +216,15 @@ Interpretation rule:
 causality. It tests whether latent dimensions from the VAE/Beta-VAE correspond
 to stable, measurable behavioral attributes.
 
+For the final project narrative, use the leakage-controlled path:
+
+- `build-household-splits`
+- `prepare.py --split-role train`
+- retrain `beta-VAE`
+- `prepare.py --split-role eval`
+- `build-window-attributes`
+- `validate-latents` on eval-only windows
+
 ### Main Metrics
 
 - `MIG`: **Mutual Information Gap**
@@ -258,6 +275,9 @@ This is useful for a final story like:
 `Campaign 26 increased spend and category diversity; the largest moving
 attributes overlap with validated latent dimensions tied to basket breadth or
 promotion intensity.`
+
+The bridge should point to factor mappings from the leakage-controlled latent
+validation outputs, not from exploratory smoke runs.
 
 ## Current Recommended Restricted Designs
 

@@ -118,7 +118,7 @@ The planned outputs are written to:
 
 - `data/validation/` for campaign-linked analytic datasets
 - `experiments/campaign_validation/` for quasi-causal campaign diagnostics
-- `experiments/latent_validation/` for latent-factor validation artifacts
+- `experiments/latent_validation_noleak_eval/` for final leakage-controlled latent-factor artifacts
 - `reports/validation_report.md` for the final research summary
 
 To build the campaign-linked validation dataset:
@@ -143,6 +143,66 @@ This command writes:
 - `data/validation/comparison_pool.parquet`
 - `data/validation/validation_attributes.parquet`
 - `data/validation/dataset_summary.json`
+
+To create a leakage-resistant household split for representation models:
+
+```bash
+PYTHONPATH=. python3 main.py build-household-splits \
+    --campaign-table data/campaign_table.csv \
+    --eval-campaign-ids 26 30 \
+    --output data/splits/household_splits.json \
+    --seed 42
+```
+
+You can then rebuild representation data without campaign `26/30` leakage:
+
+```bash
+PYTHONPATH=. python3 src/data/prepare.py \
+    --input-transactions data/transaction_data.csv \
+    --input-products data/product.csv \
+    --output-dir data/processed_no_leak_train \
+    --train-weeks 72 \
+    --val-weeks 14 \
+    --household-splits data/splits/household_splits.json \
+    --split-role train
+```
+
+The same split file can be reused for eval-only latent validation after
+retraining the representation model on the no-leak training universe:
+
+```bash
+PYTHONPATH=. python3 main.py train \
+    --arch beta_vae \
+    --run-id noleak-beta-vae-32d \
+    --data data/processed_no_leak_train/train.parquet \
+    --vocab data/processed_no_leak_train/vocabulary.json \
+    --latent-dim 32 \
+    --beta 2.0 \
+    --anneal-end 5 \
+    --epochs 10 \
+    --batch-size 64 \
+    --lr 0.001
+```
+
+```bash
+PYTHONPATH=. python3 main.py build-window-attributes \
+    --transactions data/transaction_data.csv \
+    --products data/product.csv \
+    --prepared-data data/processed_no_leak_eval/val.parquet \
+    --output data/processed_no_leak_eval/val_attributes.parquet
+```
+
+```bash
+PYTHONPATH=. python3 main.py validate-latents \
+    --analysis-data data/processed_no_leak_eval/val.parquet \
+    --attributes data/processed_no_leak_eval/val_attributes.parquet \
+    --run-ids noleak-beta-vae-32d \
+    --output-dir experiments/latent_validation_noleak_eval \
+    --mig-method binned \
+    --mig-bins 32 \
+    --mig-binning quantile \
+    --sap-method vectorized
+```
 
 To validate campaign effects with restricted quasi-causal controls:
 
@@ -187,9 +247,9 @@ To connect validated latent mappings to campaign-visible attribute shifts:
 ```bash
 PYTHONPATH=. python3 main.py build-campaign-latent-bridge \
     --campaign-results data/restricted_26_w2/restricted/campaign_effects.json \
-    --factor-mappings data/test_smoke/latent_smoke_100/out_fast_32/factor_mappings.json \
+    --factor-mappings experiments/latent_validation_noleak_eval/factor_mappings.json \
     --attributes data/restricted_26_w2/validation_attributes.parquet \
-    --output-dir data/restricted_26_w2/latent_bridge \
+    --output-dir data/restricted_26_w2/latent_bridge_noleak \
     --top-k-attributes 5
 ```
 
@@ -198,6 +258,7 @@ PYTHONPATH=. python3 main.py build-campaign-latent-bridge \
 - Validation commands support explicit `--seed` values for deterministic cohort construction where possible.
 - Campaign evidence in this repository should be interpreted as quasi-causal, not randomized causal proof.
 - Latent-factor labels should only be used when the workflow marks their mappings as validated.
+- Final latent claims should be reported only from the leakage-controlled path: held-out case-study campaigns, no-leak representation training, and eval-only latent validation.
 - Restricted campaign validation is currently most promising for campaigns `26` and `30`, not for every campaign in the dataset. Current sensitivity runs favor `26` with `2-4` week windows and `30` with `3-5` week windows.
 
 ## Metrics & Validation

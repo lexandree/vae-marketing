@@ -34,6 +34,48 @@ Review `dataset_summary.json` to confirm:
 - pre-period, in-period, and post-period windows are populated
 - exclusions are documented rather than silently dropped
 
+## 1b. Build Leakage-Resistant Household Splits
+
+If campaigns `26` and `30` are your main case studies, keep them out of
+representation training.
+
+```bash
+PYTHONPATH=. python3 main.py build-household-splits \
+  --campaign-table data/campaign_table.csv \
+  --eval-campaign-ids 26 30 \
+  --output data/splits/household_splits.json \
+  --seed 42
+```
+
+Then rebuild no-leak representation data:
+
+```bash
+PYTHONPATH=. python3 src/data/prepare.py \
+  --input-transactions data/transaction_data.csv \
+  --input-products data/product.csv \
+  --output-dir data/processed_no_leak_train \
+  --train-weeks 72 \
+  --val-weeks 14 \
+  --household-splits data/splits/household_splits.json \
+  --split-role train
+```
+
+Retrain the representation model on that no-leak training universe:
+
+```bash
+PYTHONPATH=. python3 main.py train \
+  --arch beta_vae \
+  --run-id noleak-beta-vae-32d \
+  --data data/processed_no_leak_train/train.parquet \
+  --vocab data/processed_no_leak_train/vocabulary.json \
+  --latent-dim 32 \
+  --beta 2.0 \
+  --anneal-end 5 \
+  --epochs 10 \
+  --batch-size 64 \
+  --lr 0.001
+```
+
 ## 2. Validate Campaign Effects
 
 Run the restricted quasi-causal design with explicit diagnostics.
@@ -96,10 +138,14 @@ Use experiment directory names under `experiments/` or pass explicit run paths.
 
 ```bash
 PYTHONPATH=. python3 main.py validate-latents \
-  --analysis-data data/validation/campaign_analysis.parquet \
-  --attributes data/validation/validation_attributes.parquet \
-  --run-ids baseline-best beta-best \
-  --output-dir experiments/latent_validation
+  --analysis-data data/processed_no_leak_eval/val.parquet \
+  --attributes data/processed_no_leak_eval/val_attributes.parquet \
+  --run-ids noleak-beta-vae-32d \
+  --output-dir experiments/latent_validation_noleak_eval \
+  --mig-method binned \
+  --mig-bins 32 \
+  --mig-binning quantile \
+  --sap-method vectorized
 ```
 
 Inspect:
@@ -109,6 +155,25 @@ Inspect:
 
 Reject factor names that fail holdout or stability checks.
 
+Before the command above, build the aligned eval attributes:
+
+```bash
+PYTHONPATH=. python3 src/data/prepare.py \
+  --input-transactions data/transaction_data.csv \
+  --input-products data/product.csv \
+  --output-dir data/processed_no_leak_eval \
+  --train-weeks 72 \
+  --val-weeks 14 \
+  --household-splits data/splits/household_splits.json \
+  --split-role eval
+
+PYTHONPATH=. python3 main.py build-window-attributes \
+  --transactions data/transaction_data.csv \
+  --products data/product.csv \
+  --prepared-data data/processed_no_leak_eval/val.parquet \
+  --output data/processed_no_leak_eval/val_attributes.parquet
+```
+
 ## 3b. Build A Campaign-Latent Bridge
 
 Connect campaign-visible attribute shifts to latent dimensions that were already
@@ -117,7 +182,7 @@ validated.
 ```bash
 PYTHONPATH=. python3 main.py build-campaign-latent-bridge \
   --campaign-results experiments/campaign_validation/campaign_effects.json \
-  --factor-mappings experiments/latent_validation/factor_mappings.json \
+  --factor-mappings experiments/latent_validation_noleak_eval/factor_mappings.json \
   --attributes data/validation/validation_attributes.parquet \
   --output-dir experiments/campaign_latent_bridge \
   --top-k-attributes 5
@@ -135,8 +200,8 @@ Compile campaign findings and latent validation results into one research artifa
 PYTHONPATH=. python3 main.py generate-validation-report \
   --campaign-results experiments/campaign_validation/campaign_effects.json \
   --campaign-diagnostics experiments/campaign_validation/campaign_diagnostics.json \
-  --latent-results experiments/latent_validation/factor_mappings.json \
-  --latent-metrics experiments/latent_validation/latent_metrics.json \
+  --latent-results experiments/latent_validation_noleak_eval/factor_mappings.json \
+  --latent-metrics experiments/latent_validation_noleak_eval/latent_metrics.json \
   --output reports/validation_report.md
 ```
 

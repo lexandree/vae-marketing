@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -10,6 +11,7 @@ from src.models.factory import ModelFactory
 from src.services.latent_validation import (
     align_holdout_frames,
     pivot_validation_attributes,
+    validate_latent_factors,
     validate_latent_runs,
 )
 
@@ -100,3 +102,79 @@ def test_validate_latent_runs_outputs_metrics_and_mappings(tmp_path: Path) -> No
     assert stability
     assert "mig_score" in metrics[0]
     assert "candidate_attribute" in mappings[0]
+
+
+def test_validate_latent_factors_filters_to_requested_split(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    analysis_path = tmp_path / "analysis.parquet"
+    attributes_path = tmp_path / "attributes.parquet"
+    split_path = tmp_path / "splits.json"
+
+    pd.DataFrame(
+        {
+            "HOUSEHOLD_KEY": ["H1", "H2", "H3"],
+            "WINDOW_START_DAY": [7, 14, 21],
+            "COMMODITY_A_SPEND": [1.0, 0.5, -0.5],
+            "COMMODITY_A_QTY": [1.0, 0.5, -0.5],
+            "TEMPORAL_WEEK_SIN": [0.0, 0.5, -0.5],
+            "TEMPORAL_WEEK_COS": [1.0, 0.5, 0.5],
+        }
+    ).to_parquet(analysis_path, index=False)
+    pd.DataFrame(
+        {
+            "HOUSEHOLD_KEY": ["H1", "H2", "H3"],
+            "WINDOW_START_DAY": [7, 14, 21],
+            "promo_share": [1.0, 0.5, -0.5],
+            "trip_count": [2.0, 1.5, 0.5],
+        }
+    ).to_parquet(attributes_path, index=False)
+    split_path.write_text(
+        json.dumps(
+            {
+                "eval_campaign_ids": [26, 30],
+                "eval_households": ["H2"],
+                "train_households": ["H1"],
+                "validation_households": ["H3"],
+                "metadata": {"split_seed": 42},
+            }
+        )
+    )
+
+    captured = {}
+
+    def fake_validate_latent_runs(**kwargs):
+        captured["analysis_households"] = kwargs["analysis_df"]["HOUSEHOLD_KEY"].tolist()
+        captured["attribute_households"] = kwargs["attributes_df"]["HOUSEHOLD_KEY"].tolist()
+        return [], [], []
+
+    def fake_serialize(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "src.services.latent_validation.validate_latent_runs",
+        fake_validate_latent_runs,
+    )
+    monkeypatch.setattr(
+        "src.services.latent_validation.serialize_latent_validation_outputs",
+        fake_serialize,
+    )
+
+    args = SimpleNamespace(
+        analysis_data=analysis_path,
+        attributes=attributes_path,
+        run_ids=[],
+        output_dir=tmp_path / "out",
+        household_splits=split_path,
+        split_role="eval",
+        mig_method="binned",
+        mig_bins=8,
+        mig_binning="quantile",
+        sap_method="vectorized",
+    )
+
+    validate_latent_factors(args=args)
+
+    assert captured["analysis_households"] == ["H2"]
+    assert captured["attribute_households"] == ["H2"]
