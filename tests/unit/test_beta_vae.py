@@ -1,6 +1,7 @@
 import torch
 
-from src.models.beta_vae import BetaVAE, beta_vae_loss, build_beta_vae_model
+from src.models.beta_vae import BetaVAE, beta_tcvae_loss, beta_vae_loss, build_beta_vae_model
+from src.models.factory import ModelFactory
 
 
 def test_beta_vae_forward() -> None:
@@ -43,3 +44,39 @@ def test_build_beta_vae_model() -> None:
     model = build_beta_vae_model(latent_dim=8, num_categories=10, num_temporal_features=4)
     assert isinstance(model, torch.nn.Module)
     assert model.latent_dim == 8
+
+
+def test_beta_tcvae_loss_returns_finite_components() -> None:
+    """Beta-TCVAE loss should return finite KL decomposition terms."""
+    x = torch.rand(4, 3)
+    recon_x = torch.rand(4, 3)
+    mu = torch.zeros(4, 2)
+    logvar = torch.zeros(4, 2)
+    z = mu + torch.randn_like(mu) * torch.exp(0.5 * logvar)
+
+    loss, mse, kl, mi, tc, dw_kl = beta_tcvae_loss(
+        recon_x=recon_x,
+        x=x,
+        z=z,
+        mu=mu,
+        logvar=logvar,
+        beta=2.0,
+        dataset_size=16,
+    )
+
+    for value in (loss, mse, kl, mi, tc, dw_kl):
+        assert torch.isfinite(value)
+
+
+def test_model_factory_supports_beta_tcvae() -> None:
+    """Factory should create a BetaVAE backbone for beta_tcvae architecture."""
+    model = ModelFactory.create_model(
+        {
+            "arch": "beta_tcvae",
+            "latent_dim": 6,
+            "num_categories": 4,
+            "num_temporal_features": 2,
+        }
+    )
+    assert isinstance(model, BetaVAE)
+    assert model.latent_dim == 6

@@ -2,34 +2,57 @@
 
 ## Active Tasks
 
-- [ ] **Explore Advanced VAE Architectures for Better Accuracy-Disentanglement Trade-off**
-  *Context: While Beta-VAE successfully disentangles factors by penalizing the KL divergence, it often suffers from the well-known "disentanglement-reconstruction trade-off". Increasing $\beta$ forces independence but degrades the model's ability to accurately reconstruct the original data (MSE loss increases). Now that we have established the $\beta$-VAE optimum baseline and HPO sweep landscape, we should test newer variants that resolve this trade-off.*
+- [ ] **Document the current model stack and final public narrative**
+  *Context: The repository now contains a much richer story than the original Beta-VAE prototype. Public-facing descriptions must be kept aligned with the actual evidence hierarchy: quasi-causal validation first, then no-leak latent interpretation.*
+
+  **Current facts to preserve:**
+  1. `beta-VAE` is still the strongest general held-out latent baseline.
+  2. `Contrastive VAE` is the best campaign-salient representation model so far.
+  3. `beta-TCVAE` currently looks better for campaign-to-latent bridge strength than for global latent quality.
+  4. Campaigns `26` and `30` are the current case studies; `18`, `13`, and `8` are weaker under diagnostics.
+
+- [ ] **Tune Beta-TCVAE Against The No-Leak Baselines**
+  *Context: Beta-TCVAE has already been implemented and trained. It currently underperforms `beta-VAE` on held-out global latent metrics, but it produces stronger bridges for `total_spend` and `category_diversity`. That makes it a promising interpretation model, but not yet a better universal baseline.*
+
+  **Questions to answer:**
+  1. Can `beta-TCVAE` close the `MIG/SAP` gap without losing bridge quality?
+  2. Which coefficients matter most: `beta`, `tc_alpha`, or `tc_lambda`?
+  3. Does a milder TC penalty recover better reconstruction while preserving campaign-relevant mappings?
 
   **Candidates to Evaluate:**
-  1. **$\beta$-TCVAE (Total Correlation VAE)** [[Paper](https://arxiv.org/abs/1802.04942)]
-     - *Why:* Decomposes the KL divergence and only heavily penalizes the Total Correlation (TC) term (which forces independence) without overly penalizing the mutual information between the latent space and the input.
-     - *Expected Impact:* Same or better MIG/SAP scores as Beta-VAE, but with significantly lower MSE (better accuracy). Very stable to train.
+  1. **`beta-TCVAE` coefficient sweeps**
+     - *Why:* cheapest next step, already implemented
+     - *Expected Impact:* improve held-out `MIG/SAP` without losing bridge quality
   2. **FactorVAE** [[Paper](https://arxiv.org/abs/1802.05983)]
-     - *Why:* Uses an adversarial discriminator to penalize Total Correlation.
-     - *Expected Impact:* Often yields very sharp disentanglement, though the adversarial training loop can be slightly harder to tune than $\beta$-TCVAE.
-  3. **DIP-VAE (Disentangled Inferred Prior VAE)** [[Paper](https://arxiv.org/abs/1711.00848)]
-     - *Why:* Pushes the covariance matrix of the aggregated posterior to be diagonal.
-     - *Expected Impact:* Decorrelates latent dimensions effectively, good alternative if TC estimation is too noisy.
+     - *Why:* strongest natural next TC-style benchmark after `beta-TCVAE`
+     - *Expected Impact:* may sharpen disentanglement, but introduces adversarial instability
+  3. **DIP-VAE** [[Paper](https://arxiv.org/abs/1711.00848)]
+     - *Why:* covariance-based alternative if TC estimation remains noisy
+     - *Expected Impact:* potentially cleaner global latent structure with a simpler training loop than FactorVAE
   4. **InfoVAE** [[Paper](https://arxiv.org/abs/1706.02262)]
-     - *Why:* Solves the "information preference" problem by explicitly maximizing mutual information, ensuring the latent codes are actually used by the decoder.
+     - *Why:* may help preserve informative latent usage if stronger TC penalties start collapsing useful signal
+     - *Expected Impact:* possible recovery of semantic richness at similar reconstruction quality
 
-- [ ] **Investigate Combinatorial Synergy (The "Matrix of Combinations")**
-  *Context: The regularizations proposed in the papers above target different parts of the objective function (e.g., Total Correlation vs. Mutual Information vs. Covariance). It is highly probable that combining some of these approaches will yield synergistic improvements, while others might conflict and degrade performance.*
-  
-  **Matrix Experiments to Run:**
-  - **$\beta$-TCVAE + InfoVAE:** Can we heavily penalize Total Correlation for disentanglement ($\beta$-TCVAE) while simultaneously forcing the decoder to maximize Mutual Information with the latent codes (InfoVAE) to prevent posterior collapse and maintain high accuracy?
-  - **FactorVAE + DIP-VAE:** Does combining adversarial TC penalty (FactorVAE) with explicit covariance diagonalization (DIP-VAE) over-regularize the latent space, or does it create the "ultimate" disentangled representation?
-  - **Ablation Studies:** Systematically turn on/off individual loss components across the combinations to isolate which mathematical constraint contributes most to the target metrics (MIG/SAP vs. MSE).
+- [ ] **Investigate FactorVAE As The Next Real Benchmark**
+  *Context: FactorVAE is the next most natural model after `beta-TCVAE`, but it requires a discriminator and an adversarial training loop. It should only be added if we are ready to support the additional tuning and instability cost.*
+
+  **Questions to answer:**
+  - Does FactorVAE beat `beta-VAE` or `beta-TCVAE` on held-out global metrics?
+  - Does it improve the campaign bridge for `26/30`?
+  - Is the extra adversarial complexity worth it in this project?
+
+- [ ] **Review More Recent Latent-Variable Literature Before Adding New Families**
+  *Context: The classic disentanglement papers remain useful baselines, but the research space has moved. Before adding more architectures, we should review newer work to avoid spending time on stale variants that no longer represent the strongest practical direction.*
+
+  **Focus for the literature review:**
+  - stronger disentanglement baselines after the original `beta-TCVAE / FactorVAE / DIP-VAE / InfoVAE` wave
+  - newer contrastive or intervention-aware latent models
+  - methods that better align with observational retail behavior rather than synthetic disentanglement benchmarks
 
   **Next Steps:**
-  - [ ] Implement `beta_tc_vae.py` in `src/models/`.
-  - [ ] Implement `factor_vae.py` (with auxiliary discriminator) in `src/models/`.
-  - [ ] Implement `dip_vae.py` and `info_vae.py` in `src/models/`.
-  - [ ] Update `main.py` and `factory.py` to support `--arch tc_vae`, `--arch factor_vae`, `--arch dip_vae`, and `--arch info_vae`.
-  - [ ] **Implement a flexible `--loss-components` argument** in the trainer to dynamically toggle TC-penalty, MI-maximization, and Covariance-diagonalization within a single model run.
-  - [ ] Run a WandB sweep comparing all variants **and their combinations** across identical latent dimensions to measure the Pareto frontier improvement (MSE vs MIG).
+  - [x] Implement `beta_tcvae` support in `src/models/`, `main.py`, and `factory.py`.
+  - [x] Train and validate a no-leak `beta-TCVAE` baseline.
+  - [ ] Add a comparable `FactorVAE` implementation in `src/models/`.
+  - [ ] Decide whether `DIP-VAE` is a better low-complexity next step than `FactorVAE`.
+  - [ ] Run a targeted WandB sweep for `beta-TCVAE` coefficients instead of broad architecture sprawl.
+  - [ ] Only after that, revisit whether combination-style objectives are still worth the complexity.

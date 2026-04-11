@@ -7,9 +7,11 @@ import pandas as pd
 import torch
 
 from src.models.baseline_vae import build_vae_model
+from src.models.contrastive_vae import ContrastiveVAE
 from src.models.factory import ModelFactory
 from src.services.latent_validation import (
     align_holdout_frames,
+    extract_latent_snapshots,
     pivot_validation_attributes,
     validate_latent_factors,
     validate_latent_runs,
@@ -178,3 +180,25 @@ def test_validate_latent_factors_filters_to_requested_split(
 
     assert captured["analysis_households"] == ["H2"]
     assert captured["attribute_households"] == ["H2"]
+
+
+def test_extract_latent_snapshots_supports_salient_mode() -> None:
+    model = ContrastiveVAE(shared_dim=2, salient_dim=3, num_categories=2, num_temporal_features=2)
+    analysis_df = pd.DataFrame(
+        {
+            "HOUSEHOLD_KEY": [1, 2],
+            "WINDOW_START_DAY": [7, 14],
+            "COMMODITY_A_SPEND": [1.0, 0.5],
+            "COMMODITY_A_QTY": [1.0, 0.5],
+            "TEMPORAL_WEEK_SIN": [0.0, 0.5],
+            "TEMPORAL_WEEK_COS": [1.0, 0.5],
+        }
+    )
+
+    shared_df = extract_latent_snapshots(model, analysis_df, latent_mode="shared")
+    salient_df = extract_latent_snapshots(model, analysis_df, latent_mode="salient")
+    combined_df = extract_latent_snapshots(model, analysis_df, latent_mode="combined")
+
+    assert len([c for c in shared_df.columns if c.startswith("latent_")]) == 2
+    assert len([c for c in salient_df.columns if c.startswith("latent_")]) == 3
+    assert len([c for c in combined_df.columns if c.startswith("latent_")]) == 5

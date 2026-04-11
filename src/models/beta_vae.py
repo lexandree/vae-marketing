@@ -2,6 +2,7 @@ from typing import Tuple
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 
 class BetaVAE(nn.Module):
@@ -117,6 +118,88 @@ def beta_vae_loss(
 
     total_loss = mse_loss + beta * kl_loss
     return total_loss, mse_loss, kl_loss
+
+
+def _log_density_gaussian(
+    z: torch.Tensor,
+    mu: torch.Tensor,
+    logvar: torch.Tensor,
+) -> torch.Tensor:
+    """Elementwise log-density of a diagonal Gaussian.
+
+    This helper is used by the Beta-TCVAE objective to estimate:
+    - `q(z|x)` for the sampled latent,
+    - the aggregated posterior `q(z)`,
+    - the factorized marginals `prod_j q(z_j)`.
+    """
+    normalization = -0.5 * (torch.log(torch.tensor(2.0 * torch.pi, device=z.device)) + logvar)
+    inv_var = torch.exp(-logvar)
+    return normalization - 0.5 * ((z - mu) ** 2) * inv_var
+
+
+def beta_tcvae_loss(
+    recon_x: torch.Tensor,
+    x: torch.Tensor,
+    z: torch.Tensor,
+    mu: torch.Tensor,
+    logvar: torch.Tensor,
+    beta: float,
+    dataset_size: int,
+    alpha: float = 1.0,
+    lambda_weight: float = 1.0,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Calculate the Beta-TCVAE loss via KL decomposition.
+
+    The KL term is decomposed into three interpretable pieces:
+    - mutual information `I(x; z)`
+    - total correlation `TC(z)`
+    - dimension-wise KL to the prior
+
+    We keep the backbone identical to `BetaVAE` and only swap the objective,
+    which makes comparison against `beta_vae` substantially cleaner.
+    """
+    batch_size = x.shape[0]
+    if batch_size <= 1:
+        raise ValueError("Beta-TCVAE requires batch_size > 1 for KL decomposition estimates.")
+
+    recon_loss = F.mse_loss(recon_x, x, reduction="sum") / batch_size
+
+    log_q_zx = _log_density_gaussian(z, mu, logvar).sum(dim=1)
+
+    z_expanded = z.unsqueeze(1)
+    mu_expanded = mu.unsqueeze(0)
+    logvar_expanded = logvar.unsqueeze(0)
+    mat_log_q_z = _log_density_gaussian(z_expanded, mu_expanded, logvar_expanded)
+
+    normalizer = torch.log(torch.tensor(float(max(dataset_size, batch_size)), device=z.device))
+    log_q_z = torch.logsumexp(mat_log_q_z.sum(dim=2), dim=1) - normalizer
+    log_prod_q_z = torch.logsumexp(mat_log_q_z, dim=1).sum(dim=1) - z.shape[1] * normalizer
+
+    log_p_z = _log_density_gaussian(
+        z,
+        torch.zeros_like(z),
+        torch.zeros_like(z),
+    ).sum(dim=1)
+
+    mutual_information = torch.mean(log_q_zx - log_q_z)
+    total_correlation = torch.mean(log_q_z - log_prod_q_z)
+    dimension_wise_kl = torch.mean(log_prod_q_z - log_p_z)
+
+    total_loss = (
+        recon_loss
+        + alpha * mutual_information
+        + beta * total_correlation
+        + lambda_weight * dimension_wise_kl
+    )
+    kl_loss = mutual_information + total_correlation + dimension_wise_kl
+    return (
+        total_loss,
+        recon_loss,
+        kl_loss,
+        mutual_information,
+        total_correlation,
+        dimension_wise_kl,
+    )
 
 def build_beta_vae_model(
     latent_dim: int = 32,

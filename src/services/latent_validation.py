@@ -70,6 +70,7 @@ def extract_latent_snapshots(
     model: torch.nn.Module,
     analysis_df: pd.DataFrame,
     device: torch.device | None = None,
+    latent_mode: str = "combined",
 ) -> pd.DataFrame:
     """Extract latent means for each aligned analysis row."""
     category_cols, temporal_cols = _select_feature_columns(analysis_df)
@@ -89,7 +90,20 @@ def extract_latent_snapshots(
     model = model.to(target_device)
     model.eval()
     with torch.no_grad():
-        mu, _ = model.encode(x_tensor, t_tensor)
+        if latent_mode == "combined":
+            mu, _ = model.encode(x_tensor, t_tensor)
+        elif hasattr(model, "encode_components"):
+            shared_mu, _, salient_mu, _ = model.encode_components(x_tensor, t_tensor)
+            if latent_mode == "shared":
+                mu = shared_mu
+            elif latent_mode == "salient":
+                mu = salient_mu
+            else:
+                raise ValueError(f"Unsupported latent_mode: {latent_mode}")
+        else:
+            raise ValueError(
+                f"Model of type {type(model).__name__} does not support latent_mode='{latent_mode}'"
+            )
 
     key_columns = [c for c in ("HOUSEHOLD_KEY", "CAMPAIGN", "WINDOW_START_DAY") if c in analysis_df.columns]
     latent_df = analysis_df[key_columns].copy()
@@ -136,10 +150,11 @@ def load_run_latents(
     analysis_df: pd.DataFrame,
     filename: str = "best_model.pth",
     device: torch.device | None = None,
+    latent_mode: str = "combined",
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Load a trained run and extract latent snapshots for a feature frame."""
     model, config = ModelFactory.load_model_with_config(run_dir, filename=filename)
-    latent_df = extract_latent_snapshots(model, analysis_df, device=device)
+    latent_df = extract_latent_snapshots(model, analysis_df, device=device, latent_mode=latent_mode)
     return latent_df, config
 
 
@@ -148,6 +163,7 @@ def _build_factor_mapping_rows(
     model_type: str,
     latent_df: pd.DataFrame,
     attributes_df: pd.DataFrame,
+    latent_mode: str = "combined",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Build factor mapping and stability rows for one run."""
     latent_cols = [c for c in latent_df.columns if c.startswith("latent_")]
@@ -185,6 +201,7 @@ def _build_factor_mapping_rows(
             {
                 "run_id": run_id,
                 "model_type": model_type,
+                "latent_mode": latent_mode,
                 "latent_dimension": latent_index,
                 "candidate_attribute": best_attribute,
                 "association_strength": best_score,
@@ -195,6 +212,7 @@ def _build_factor_mapping_rows(
             {
                 "run_id": run_id,
                 "model_type": model_type,
+                "latent_mode": latent_mode,
                 "latent_dimension": latent_index,
                 "candidate_attribute": best_attribute,
                 "stability_status": stability_status,
@@ -213,6 +231,7 @@ def validate_latent_runs(
     mig_bins: int = 16,
     mig_binning: str = "quantile",
     sap_method: str = "sklearn",
+    latent_mode: str = "combined",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Validate latent runs and return metrics, mappings, and stability outputs."""
     wide_attributes = pivot_validation_attributes(attributes_df)
@@ -224,7 +243,12 @@ def validate_latent_runs(
     stability_rows: list[dict[str, Any]] = []
 
     for run_dir in run_dirs:
-        latent_df, config = load_run_latents(run_dir, aligned_analysis, device=device)
+        latent_df, config = load_run_latents(
+            run_dir,
+            aligned_analysis,
+            device=device,
+            latent_mode=latent_mode,
+        )
         metrics = evaluate_latent_metrics(
             latent_df,
             aligned_attributes,
@@ -239,6 +263,7 @@ def validate_latent_runs(
             {
                 "run_id": run_id,
                 "model_type": model_type,
+                "latent_mode": latent_mode,
                 **metrics,
             }
         )
@@ -247,6 +272,7 @@ def validate_latent_runs(
             model_type,
             latent_df,
             aligned_attributes,
+            latent_mode=latent_mode,
         )
         mapping_rows.extend(run_mapping_rows)
         stability_rows.extend(run_stability_rows)
@@ -274,6 +300,7 @@ def validate_latent_factors(*, args: Any) -> None:
         mig_bins=getattr(args, "mig_bins", 16),
         mig_binning=getattr(args, "mig_binning", "quantile"),
         sap_method=getattr(args, "sap_method", "sklearn"),
+        latent_mode=getattr(args, "latent_mode", "combined"),
     )
     output_dir = Path(args.output_dir)
     serialize_latent_validation_outputs(output_dir, metrics_rows, mapping_rows, stability_rows)

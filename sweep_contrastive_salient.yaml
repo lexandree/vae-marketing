@@ -1,0 +1,52 @@
+name: contrastive-vae-salient-heldout
+project: vae_marketing
+program: main.py
+method: bayes
+metric:
+  name: salient_eval_score
+  goal: maximize
+parameters:
+  latent-split:
+    values: ["24_8", "20_12", "16_16", "12_20", "8_24"]
+  salient-background-weight:
+    distribution: uniform
+    min: 0.75
+    max: 1.5
+  beta-shared:
+    values: [0.75, 1.0, 1.25]
+  beta-salient:
+    values: [0.5, 0.75, 1.0, 1.25, 1.5]
+  lr:
+    distribution: log_uniform_values
+    min: 0.0005
+    max: 0.002
+  batch-size:
+    values: [64, 128]
+  epochs:
+    value: 10
+command:
+  - ${interpreter}
+  - ${program}
+  - train-contrastive
+  - --target-data
+  - data/contrastive_no_leak_train/target.parquet
+  - --background-data
+  - data/contrastive_no_leak_train/background.parquet
+  - --wandb
+  - --verbosity
+  - "0"
+  - --eval-analysis-data
+  - data/processed_no_leak_eval/val.parquet
+  - --eval-attributes
+  - data/processed_no_leak_eval/val_attributes.parquet
+  - --eval-latent-mode
+  - salient
+  - --eval-mig-method
+  - binned
+  - --eval-mig-bins
+  - "32"
+  - --eval-mig-binning
+  - quantile
+  - --eval-sap-method
+  - vectorized
+  - ${args}
