@@ -1,12 +1,13 @@
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import torch
 from torch import nn
 
 from src.models.baseline_vae import build_vae_model
 from src.models.beta_vae import build_beta_vae_model
+from src.models.contrastive_vae import build_contrastive_vae_model
 
 
 class ModelFactory:
@@ -20,20 +21,33 @@ class ModelFactory:
         num_categories = config.get("num_categories", 10)
         num_temporal = config.get("num_temporal_features", 6)
 
-        if arch == "beta_vae":
+        if arch in {"beta_vae", "beta_tcvae"}:
             return build_beta_vae_model(latent_dim, num_categories, num_temporal)
+        if arch == "contrastive_vae":
+            shared_dim = config.get("shared_dim", max(1, latent_dim // 2))
+            salient_dim = config.get("salient_dim", max(1, latent_dim - shared_dim))
+            return build_contrastive_vae_model(
+                shared_dim=shared_dim,
+                salient_dim=salient_dim,
+                num_categories=num_categories,
+                num_temporal_features=num_temporal,
+            )
         return build_vae_model(latent_dim, num_categories, num_temporal)
 
     @staticmethod
-    def load_model(run_dir: Path, filename: str = "best_model.pth") -> nn.Module:
-        """Loads a model and its weights from the run directory."""
+    def load_config(run_dir: Path) -> Dict[str, Any]:
+        """Load the experiment configuration from a run directory."""
         config_path = run_dir / "config.json"
         if not config_path.exists():
             raise FileNotFoundError(f"Config not found in {run_dir}")
 
         with open(config_path, "r") as f:
-            config = json.load(f)
+            return json.load(f)
 
+    @staticmethod
+    def load_model(run_dir: Path, filename: str = "best_model.pth") -> nn.Module:
+        """Loads a model and its weights from the run directory."""
+        config = ModelFactory.load_config(run_dir)
         model = ModelFactory.create_model(config)
         weights_path = run_dir / filename
         if not weights_path.exists():
@@ -43,8 +57,18 @@ class ModelFactory:
         if not weights_path.exists():
             raise FileNotFoundError(f"Model weights not found in {run_dir}")
 
-        model.load_state_dict(torch.load(weights_path))
+        model.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True))
         return model
+
+    @staticmethod
+    def load_model_with_config(
+        run_dir: Path,
+        filename: str = "best_model.pth",
+    ) -> Tuple[nn.Module, Dict[str, Any]]:
+        """Load a model together with its config."""
+        config = ModelFactory.load_config(run_dir)
+        model = ModelFactory.load_model(run_dir, filename=filename)
+        return model, config
 
     @staticmethod
     def save_config(config: Dict[str, Any], run_dir: Path) -> None:

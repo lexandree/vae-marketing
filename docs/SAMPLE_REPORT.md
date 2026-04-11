@@ -1,14 +1,20 @@
 # Post-Campaign Behavioral Impact Analysis
 
-**Campaign:** Summer Electronics Promo (Weeks 86-102)
-**Baseline:** Historical 12-Month Average
-**Target Audience:** 200 Sampled Households
+**Campaign:** Example Campaign 26
+**Design:** Restricted matched observational comparison
+**Target Audience:** Matched treated/comparison cohorts
 
 ## Executive Summary
 
-The recent Summer Electronics Promo successfully disrupted routine shopping behavior. Rather than simply capturing planned purchases at a discount, the campaign caused a significant structural shift in how our customers build their baskets. 
+Under the current restricted validation design, Campaign `26` shows the strongest evidence in this project for a measurable behavioral effect. The result should be read as **supported quasi-causal evidence**, not as randomized causal proof.
 
-The campaign achieved a **High Impact Score (2.18)** and these new habits persisted for an average of **154 days**. 
+The main supported outcomes are:
+
+- `total_spend`
+- `trip_count`
+- `category_diversity`
+
+The latent interpretation layer suggests that the shift aligns with validated factors related to `total_spend` and `category_diversity`.
 
 ---
 
@@ -16,46 +22,82 @@ The campaign achieved a **High Impact Score (2.18)** and these new habits persis
 
 | Metric | Score | Interpretation |
 | :--- | :--- | :--- |
-| **Impact Score (Latent Deviation)** | **2.18** | **High.** Customers significantly altered their baseline shopping behavior. |
-| **Stickiness (Persistence)** | **154 Days** | **Excellent.** The new behaviors outlasted the promotion by ~5 months. |
-| **Households Shifted** | **100%** | All 200 sampled households showed measurable deviations. |
+| **Evidence Label: `total_spend`** | **Supported** | Spend increased under the restricted matched design. |
+| **Evidence Label: `trip_count`** | **Supported** | Visit frequency moved with the campaign under the same design. |
+| **Evidence Label: `category_diversity`** | **Supported** | Basket breadth also shifted, not only spend. |
+| **Promo Share** | **Supported** | Useful supporting signal, but not the main business headline. |
 
 ---
 
-## 2. Customer Segmentation
+## 2. Design Diagnostics
 
-Based on how people reacted, the AI segmented our audience into three distinct groups:
+Before reading the business result, check whether the comparison design looks credible.
 
-*   **Segment 0 (The Mainstream Changers - 87 households):** These customers showed the average shift. They responded to the promo and maintained a moderate level of engagement across multiple categories.
-*   **Segment 1 (The Snipers - 7 households):** Highly targeted shift. They engaged deeply with specific promoted categories but ignored the rest of the store.
-*   **Segment 2 (The Total Converts - 6 households):** The "holy grail" segment. Massive structural shifts across their entire basket. They essentially became different types of shoppers after this campaign.
+- **Matching method:** Propensity matching with caliper restriction
+- **Window strategy:** Restricted event-time windows
+- **Balance check:** Passed well enough for this campaign to remain in scope
+- **Placebo-style diagnostics:** Acceptable relative to weaker campaigns such as `18`, `13`, and `8`
 
----
+Interpretation:
 
-## 3. What Actually Changed? (Factor Breakdown)
-
-Instead of just looking at revenue, we analyzed *how* the baskets changed. The total behavioral shift (2.18) was driven primarily by three latent factors:
-
-1.  **Factor 142 (Price-Tier Upgrade): +0.33 impact**
-    *   *Insight:* Customers didn't just buy more; they used the promotion as an excuse to buy *premium* brands they usually avoid.
-2.  **Factor 11 (Cross-Category Exploration): +0.31 impact**
-    *   *Insight:* The campaign successfully drove traffic to adjacent aisles. Baskets became more diverse.
-3.  **Factor 75 (Volume Stockpiling): +0.27 impact**
-    *   *Insight:* A secondary effect was bulk-buying of staples, likely to hit promotional thresholds.
+- this campaign survived the design checks better than the weaker candidates
+- that is why it is usable as a case study
+- this does **not** mean the result is equivalent to a randomized controlled experiment
 
 ---
 
-## 4. Top Category Drivers
+## 3. What Actually Changed?
 
-If we want to replicate this success, these are the top 5 product categories that act as "gateways" to changing customer behavior. Discounting these items causes a ripple effect across the entire basket:
+Instead of only asking whether spend moved, the workflow checks what kind of shopper behavior changed.
 
-1.  **HALLOWEEN Merchandise** (Sensitivity Score: 18.2)
-2.  **RESTRICTED DIET Foods** (Sensitivity Score: 10.9)
-3.  **EYE CARE Products** (Sensitivity Score: 10.3)
-4.  **ETHNIC PERSONAL CARE** (Sensitivity Score: 8.6)
-5.  **SMOKING CESSATIONS** (Sensitivity Score: 8.0)
+Main observed shifts:
 
-*Strategic Recommendation:* For the upcoming Q4 campaign, heavily subsidize "Restricted Diet" items. The data proves that engaging a customer in this specific category structurally improves their long-term value and basket diversity across the store.
+1. **Higher total spend**
+   *Interpretation:* Households spent more during the campaign window under the restricted matched comparison.
+2. **Higher category diversity**
+   *Interpretation:* The campaign was associated with broader baskets, not just more spend in the same narrow set of products.
+3. **Higher trip count**
+   *Interpretation:* The signal is consistent with more active store engagement, not only a single stock-up event.
+
+---
+
+## 4. Latent Interpretation
+
+The current latent stack should be interpreted conservatively:
+
+- **`beta-VAE`**
+  - strongest general held-out latent baseline
+- **`beta-TCVAE`**
+  - strongest campaign bridge in the current project
+- **`Contrastive VAE`**
+  - best target-vs-background campaign-salient model
+
+For Campaign `26`, the bridge currently aligns the observed shift most strongly with validated factors tied to:
+
+1. **`total_spend`**
+2. **`category_diversity`**
+
+Interpretation rule:
+
+- these factors are useful as explanatory aids
+- they are not proofs of the underlying business mechanism
+
+---
+
+## 5. Strategic Use
+
+This kind of report is useful for:
+
+- choosing which campaigns deserve deeper follow-up
+- deciding whether a campaign likely changed behavior or just moved short-term sales
+- generating hypotheses for future randomized tests
+- identifying whether the shift looks more like breadth, spend, or visit-frequency movement
+
+This kind of report is **not** enough for:
+
+- claiming strict causal proof
+- replacing randomized experimentation
+- claiming that one latent factor is the true business driver
 
 ---
 *Generated by the VAE Marketing Impact Engine.*

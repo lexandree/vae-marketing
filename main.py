@@ -10,15 +10,29 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.models.beta_vae import beta_vae_loss
+from src.data.campaign_dataset import (
+    build_campaign_analysis_dataset,
+    write_validation_artifacts,
+)
+from src.data.contrastive_dataset import build_contrastive_dataset_from_args
+from src.data.dataset import load_validation_source
+from src.data.splits import build_household_splits, write_household_splits
+from src.data.window_validation import build_and_write_window_attributes
+from src.models.beta_vae import beta_tcvae_loss, beta_vae_loss
 from src.models.factory import ModelFactory
 from src.services.baseline import get_household_profile, vae_loss
+from src.services.campaign_latent_bridge import build_campaign_latent_bridge
+from src.services.campaign_sensitivity import run_campaign_sensitivity
+from src.services.campaign_validation import validate_campaign_effects
+from src.services.contrastive_training import train_contrastive_vae
 from src.services.impact_analysis import (
     analyze_persistence,
     calculate_deviation,
     categorize_shift,
 )
+from src.services.latent_validation import validate_latent_factors
 from src.services.reporting_baseline import generate_aggregate_report
+from src.services.validation_reporting import generate_validation_report
 from src.utils.metrics import setup_logger
 from src.utils.seed import set_seed
 from src.utils.wandb_logger import finish_logging, init_wandb, log_metrics, save_artifact
@@ -41,17 +55,24 @@ def run_training_loop(
     optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"])
     best_loss = float('inf')
     avg_kl = 0.0
+    dataset_size = int(config.get("dataset_size", 0))
 
     model.train()
     for epoch in range(args.epochs):
         total_loss, total_mse, total_kl = 0.0, 0.0, 0.0
+        total_mi, total_tc, total_dw_kl = 0.0, 0.0, 0.0
         current_beta = args.beta
-        if args.arch == "beta_vae":
+        if args.arch in {"beta_vae", "beta_tcvae"}:
             current_beta = model.get_beta(epoch, args.anneal_end, args.beta)
 
         for batch_x, batch_t in dataloader:
             optimizer.zero_grad()
-            recon_x, mu, logvar = model(batch_x, batch_t)
+            if args.arch == "beta_tcvae":
+                mu, logvar = model.encode(batch_x, batch_t)
+                z = model.reparameterize(mu, logvar)
+                recon_x = model.decode(z, batch_t)
+            else:
+                recon_x, mu, logvar = model(batch_x, batch_t)
 
             if args.arch == "beta_vae":
                 loss, mse, kl = beta_vae_loss(
@@ -59,6 +80,23 @@ def run_training_loop(
                 )
                 total_mse += mse.item()
                 total_kl += kl.item()
+            elif args.arch == "beta_tcvae":
+                loss, mse, kl, mi, tc, dw_kl = beta_tcvae_loss(
+                    recon_x,
+                    batch_x,
+                    z,
+                    mu,
+                    logvar,
+                    current_beta,
+                    dataset_size=dataset_size,
+                    alpha=args.tc_alpha,
+                    lambda_weight=args.tc_lambda,
+                )
+                total_mse += mse.item()
+                total_kl += kl.item()
+                total_mi += mi.item()
+                total_tc += tc.item()
+                total_dw_kl += dw_kl.item()
             else:
                 loss = vae_loss(recon_x, batch_x, mu, logvar)
                 total_mse += loss.item()
@@ -70,6 +108,9 @@ def run_training_loop(
         avg_loss = total_loss / len(dataloader)
         avg_mse = total_mse / len(dataloader)
         avg_kl = total_kl / len(dataloader)
+        avg_mi = total_mi / len(dataloader) if args.arch == "beta_tcvae" else 0.0
+        avg_tc = total_tc / len(dataloader) if args.arch == "beta_tcvae" else 0.0
+        avg_dw_kl = total_dw_kl / len(dataloader) if args.arch == "beta_tcvae" else 0.0
 
         is_best = avg_loss < best_loss
         if is_best:
@@ -84,8 +125,11 @@ def run_training_loop(
         if should_log_wandb:
             log_metrics({
                 "epoch": epoch, "loss": avg_loss, "mse_loss": avg_mse,
-                "kl_loss": avg_kl if args.arch == "beta_vae" else 0.0,
-                "beta": current_beta if args.arch == "beta_vae" else 1.0
+                "kl_loss": avg_kl if args.arch in {"beta_vae", "beta_tcvae"} else 0.0,
+                "mi_loss": avg_mi if args.arch == "beta_tcvae" else 0.0,
+                "tc_loss": avg_tc if args.arch == "beta_tcvae" else 0.0,
+                "dw_kl_loss": avg_dw_kl if args.arch == "beta_tcvae" else 0.0,
+                "beta": current_beta if args.arch in {"beta_vae", "beta_tcvae"} else 1.0
             }, step=epoch)
 
         should_log_console = (
@@ -96,6 +140,11 @@ def run_training_loop(
             logger.info(
                 f"Epoch {epoch+1}/{args.epochs} | Loss: {avg_loss:.4f} | "
                 f"MSE: {avg_mse:.4f} | KL: {avg_kl:.4f}"
+                + (
+                    f" | MI: {avg_mi:.4f} | TC: {avg_tc:.4f} | DW-KL: {avg_dw_kl:.4f}"
+                    if args.arch == "beta_tcvae"
+                    else ""
+                )
             )
 
     return best_loss, avg_kl
@@ -122,9 +171,11 @@ def train_command(args: argparse.Namespace) -> None:
     config = {
         "run_id": run_id, "arch": args.arch, "latent_dim": args.latent_dim,
         "beta": args.beta, "anneal_epochs": args.anneal_end, "use_gkl": args.gkl,
+        "tc_alpha": args.tc_alpha, "tc_lambda": args.tc_lambda,
         "num_categories": num_categories, "num_temporal_features": len(temporal_cols),
         "epochs": args.epochs, "batch_size": args.batch_size, "learning_rate": args.lr,
-        "vocabulary_path": str(args.vocab), "train_data_path": str(args.data)
+        "vocabulary_path": str(args.vocab), "train_data_path": str(args.data),
+        "dataset_size": len(train_df),
     }
 
     if args.wandb:
@@ -262,6 +313,120 @@ def compare_command(args: argparse.Namespace) -> None:
     print("=" * 50 + "\n")
 
 
+def build_validation_data_command(args: argparse.Namespace) -> None:
+    """Build the campaign validation dataset."""
+    transactions = load_validation_source(args.transactions, "transactions")
+    products = load_validation_source(args.products, "products")
+    campaign_table = load_validation_source(args.campaign_table, "campaign_table")
+    campaign_desc = load_validation_source(args.campaign_desc, "campaign_desc")
+    coupon = load_validation_source(args.coupon, "coupon")
+    coupon_redempt = load_validation_source(args.coupon_redempt, "coupon_redempt")
+    demographics = (
+        load_validation_source(args.demographics, "demographics")
+        if args.demographics is not None
+        else None
+    )
+    causal_data = (
+        load_validation_source(args.causal_data, "causal_data")
+        if args.causal_data is not None
+        else None
+    )
+
+    analysis_df, comparison_df, attributes_df, summary = build_campaign_analysis_dataset(
+        transactions=transactions,
+        products=products,
+        campaign_table=campaign_table,
+        campaign_desc=campaign_desc,
+        coupon=coupon,
+        coupon_redempt=coupon_redempt,
+        demographics=demographics,
+        causal_data=causal_data,
+        campaign_ids=args.campaign_ids,
+        pre_weeks=args.pre_weeks,
+        post_weeks=args.post_weeks,
+    )
+    write_validation_artifacts(
+        args.output_dir,
+        analysis_df,
+        comparison_df,
+        attributes_df,
+        summary,
+    )
+
+    print("\n" + "=" * 50 + "\nVALIDATION DATASET SUMMARY\n" + "=" * 50)
+    print(f"Campaigns: {summary['selected_campaigns']}")
+    print(f"Analysis records: {summary['analysis_records']}")
+    print(f"Treated records: {summary['treated_records']}")
+    print(f"Comparison records: {summary['comparison_records']}")
+    print(f"Validation attribute rows: {summary['validation_attribute_rows']}")
+    print(f"Artifacts saved to: {args.output_dir}")
+    print("=" * 50 + "\n")
+
+
+def build_household_splits_command(args: argparse.Namespace) -> None:
+    """Build a leakage-resistant household split file."""
+    campaign_table = load_validation_source(args.campaign_table, "campaign_table")
+    splits = build_household_splits(
+        campaign_table=campaign_table,
+        eval_campaign_ids=args.eval_campaign_ids,
+        seed=args.seed,
+    )
+    output_path = Path(args.output)
+    write_household_splits(splits, output_path)
+
+    print("\n" + "=" * 50 + "\nHOUSEHOLD SPLIT SUMMARY\n" + "=" * 50)
+    print(f"Eval campaigns: {splits['eval_campaign_ids']}")
+    print(f"Train households: {len(splits['train_households'])}")
+    print(f"Validation households: {len(splits['validation_households'])}")
+    print(f"Eval households: {len(splits['eval_households'])}")
+    print(f"Split file saved to: {output_path}")
+    print("=" * 50 + "\n")
+
+
+def build_window_attributes_command(args: argparse.Namespace) -> None:
+    """Build window-aligned observable attributes for latent validation."""
+    build_and_write_window_attributes(args=args)
+
+
+def build_contrastive_data_command(args: argparse.Namespace) -> None:
+    """Build target/background datasets for contrastive VAE training."""
+    build_contrastive_dataset_from_args(args=args)
+
+
+def validate_campaigns_command(args: argparse.Namespace) -> None:
+    """Run quasi-causal campaign validation."""
+    validate_campaign_effects(args=args)
+
+
+def analyze_campaign_sensitivity_command(args: argparse.Namespace) -> None:
+    """Run reproducible sensitivity analysis for campaign validation."""
+    run_campaign_sensitivity(args=args)
+
+
+def validate_latents_command(args: argparse.Namespace) -> None:
+    """Run latent-factor validation."""
+    validate_latent_factors(args=args)
+
+
+def train_contrastive_command(args: argparse.Namespace) -> None:
+    """Train a contrastive VAE on target/background campaign windows."""
+    if getattr(args, "latent_split", None):
+        shared_dim_str, salient_dim_str = args.latent_split.split("_", maxsplit=1)
+        args.shared_dim = int(shared_dim_str)
+        args.salient_dim = int(salient_dim_str)
+    train_contrastive_vae(args=args)
+
+
+def generate_validation_report_command(args: argparse.Namespace) -> None:
+    """Generate the final validation report."""
+    generate_validation_report(args=args)
+
+
+def build_campaign_latent_bridge_command(args: argparse.Namespace) -> None:
+    """Connect campaign shifts to validated latent mappings."""
+    build_campaign_latent_bridge(args=args)
+
+
 def main() -> None:
     """Main entry point for the CLI."""
     parser = argparse.ArgumentParser(description="VAE Marketing Impact Analysis")
@@ -271,7 +436,7 @@ def main() -> None:
     train_parser.add_argument("--data", type=Path, required=True)
     train_parser.add_argument("--vocab", type=Path, required=True)
     train_parser.add_argument(
-        "--arch", type=str, default="baseline", choices=["baseline", "beta_vae"]
+        "--arch", type=str, default="baseline", choices=["baseline", "beta_vae", "beta_tcvae"]
     )
     train_parser.add_argument("--run-id", type=str, default=None)
     train_parser.add_argument("--beta", type=float, default=1.0)
@@ -284,6 +449,8 @@ def main() -> None:
     train_parser.add_argument("--upload-model", action="store_true")
     train_parser.add_argument("--verbosity", type=int, default=1, choices=[0, 1, 2])
     train_parser.add_argument("--gkl", action="store_true")
+    train_parser.add_argument("--tc-alpha", type=float, default=1.0)
+    train_parser.add_argument("--tc-lambda", type=float, default=1.0)
 
     infer_parser = subparsers.add_parser("infer", help="Run inference on data")
     infer_parser.add_argument("--run-id", type=str, required=True)
@@ -294,6 +461,218 @@ def main() -> None:
     compare_parser = subparsers.add_parser("compare", help="Compare across Run-IDs")
     compare_parser.add_argument("run_ids", nargs="+")
 
+    build_validation_parser = subparsers.add_parser(
+        "build-validation-data",
+        help="Build campaign-linked validation datasets",
+    )
+    build_validation_parser.add_argument("--transactions", type=Path, required=True)
+    build_validation_parser.add_argument("--products", type=Path, required=True)
+    build_validation_parser.add_argument("--campaign-table", type=Path, required=True)
+    build_validation_parser.add_argument("--campaign-desc", type=Path, required=True)
+    build_validation_parser.add_argument("--coupon", type=Path, required=True)
+    build_validation_parser.add_argument("--coupon-redempt", type=Path, required=True)
+    build_validation_parser.add_argument("--demographics", type=Path, default=None)
+    build_validation_parser.add_argument("--causal-data", type=Path, default=None)
+    build_validation_parser.add_argument("--campaign-ids", type=int, nargs="+", required=True)
+    build_validation_parser.add_argument("--output-dir", type=Path, required=True)
+    build_validation_parser.add_argument("--pre-weeks", type=int, default=8)
+    build_validation_parser.add_argument("--post-weeks", type=int, default=8)
+    build_validation_parser.add_argument("--seed", type=int, default=42)
+
+    split_parser = subparsers.add_parser(
+        "build-household-splits",
+        help="Build leakage-resistant household splits for representation models",
+    )
+    split_parser.add_argument("--campaign-table", type=Path, required=True)
+    split_parser.add_argument("--eval-campaign-ids", type=int, nargs="+", required=True)
+    split_parser.add_argument("--output", type=Path, required=True)
+    split_parser.add_argument("--seed", type=int, default=42)
+
+    window_attr_parser = subparsers.add_parser(
+        "build-window-attributes",
+        help="Build observable attributes aligned to prepared household windows",
+    )
+    window_attr_parser.add_argument("--transactions", type=Path, required=True)
+    window_attr_parser.add_argument("--products", type=Path, required=True)
+    window_attr_parser.add_argument("--prepared-data", type=Path, required=True)
+    window_attr_parser.add_argument("--output", type=Path, required=True)
+
+    contrastive_data_parser = subparsers.add_parser(
+        "build-contrastive-data",
+        help="Build target/background weekly frames for Contrastive VAE training",
+    )
+    contrastive_data_parser.add_argument("--prepared-data", type=Path, required=True)
+    contrastive_data_parser.add_argument("--campaign-table", type=Path, required=True)
+    contrastive_data_parser.add_argument("--campaign-desc", type=Path, required=True)
+    contrastive_data_parser.add_argument("--output-dir", type=Path, required=True)
+    contrastive_data_parser.add_argument("--campaign-ids", type=int, nargs="*", default=None)
+    contrastive_data_parser.add_argument("--exclude-campaign-ids", type=int, nargs="*", default=None)
+    contrastive_data_parser.add_argument("--background-ratio", type=float, default=1.0)
+    contrastive_data_parser.add_argument("--seed", type=int, default=42)
+
+    validate_campaigns_parser = subparsers.add_parser(
+        "validate-campaigns",
+        help="Validate campaign effects with quasi-causal diagnostics",
+    )
+    validate_campaigns_parser.add_argument("--analysis-data", type=Path, required=True)
+    validate_campaigns_parser.add_argument("--campaign-ids", type=int, nargs="+", required=True)
+    validate_campaigns_parser.add_argument("--method", type=str, required=True)
+    validate_campaigns_parser.add_argument("--output-dir", type=Path, required=True)
+    validate_campaigns_parser.add_argument("--outcomes", nargs="*", default=None)
+    validate_campaigns_parser.add_argument("--min-treated", type=int, default=30)
+    validate_campaigns_parser.add_argument("--min-comparison", type=int, default=30)
+    validate_campaigns_parser.add_argument(
+        "--matching-method",
+        type=str,
+        choices=["none", "propensity"],
+        default="none",
+    )
+    validate_campaigns_parser.add_argument("--propensity-caliper", type=float, default=0.02)
+    validate_campaigns_parser.add_argument("--seed", type=int, default=42)
+
+    sensitivity_parser = subparsers.add_parser(
+        "analyze-campaign-sensitivity",
+        help="Run a sensitivity grid for campaign validation",
+    )
+    sensitivity_parser.add_argument("--transactions", type=Path, required=True)
+    sensitivity_parser.add_argument("--products", type=Path, required=True)
+    sensitivity_parser.add_argument("--campaign-table", type=Path, required=True)
+    sensitivity_parser.add_argument("--campaign-desc", type=Path, required=True)
+    sensitivity_parser.add_argument("--coupon", type=Path, required=True)
+    sensitivity_parser.add_argument("--coupon-redempt", type=Path, required=True)
+    sensitivity_parser.add_argument("--demographics", type=Path, default=None)
+    sensitivity_parser.add_argument("--campaign-ids", type=int, nargs="+", required=True)
+    sensitivity_parser.add_argument("--weeks-grid", type=int, nargs="+", required=True)
+    sensitivity_parser.add_argument("--output-dir", type=Path, required=True)
+    sensitivity_parser.add_argument("--outcomes", nargs="*", default=None)
+    sensitivity_parser.add_argument("--matching-methods", nargs="*", default=["propensity"])
+    sensitivity_parser.add_argument("--propensity-calipers", type=float, nargs="*", default=[0.02])
+    sensitivity_parser.add_argument("--min-treated", type=int, default=30)
+    sensitivity_parser.add_argument("--min-comparison", type=int, default=30)
+
+    validate_latents_parser = subparsers.add_parser(
+        "validate-latents",
+        help="Validate latent-factor semantics",
+    )
+    validate_latents_parser.add_argument("--analysis-data", type=Path, required=True)
+    validate_latents_parser.add_argument("--attributes", type=Path, required=True)
+    validate_latents_parser.add_argument("--run-ids", nargs="+", required=True)
+    validate_latents_parser.add_argument("--output-dir", type=Path, required=True)
+    validate_latents_parser.add_argument("--household-splits", type=Path, default=None)
+    validate_latents_parser.add_argument(
+        "--split-role",
+        type=str,
+        choices=["train", "validation", "eval", "all"],
+        default="eval",
+    )
+    validate_latents_parser.add_argument(
+        "--latent-mode",
+        type=str,
+        choices=["combined", "shared", "salient"],
+        default="combined",
+    )
+    validate_latents_parser.add_argument("--model-types", nargs="*", default=None)
+    validate_latents_parser.add_argument("--holdout-split", type=str, default="validation")
+    validate_latents_parser.add_argument("--seeds", type=int, nargs="*", default=None)
+    validate_latents_parser.add_argument("--top-k-attributes", type=int, default=5)
+    validate_latents_parser.add_argument(
+        "--mig-method",
+        type=str,
+        choices=["sklearn", "binned"],
+        default="sklearn",
+    )
+    validate_latents_parser.add_argument("--mig-bins", type=int, default=16)
+    validate_latents_parser.add_argument(
+        "--mig-binning",
+        type=str,
+        choices=["quantile", "uniform"],
+        default="quantile",
+    )
+    validate_latents_parser.add_argument(
+        "--sap-method",
+        type=str,
+        choices=["sklearn", "vectorized"],
+        default="sklearn",
+    )
+
+    latent_bridge_parser = subparsers.add_parser(
+        "build-campaign-latent-bridge",
+        help="Connect campaign attribute shifts to validated latent mappings",
+    )
+    latent_bridge_parser.add_argument("--campaign-results", type=Path, required=True)
+    latent_bridge_parser.add_argument("--factor-mappings", type=Path, required=True)
+    latent_bridge_parser.add_argument("--attributes", type=Path, required=True)
+    latent_bridge_parser.add_argument("--output-dir", type=Path, required=True)
+    latent_bridge_parser.add_argument("--top-k-attributes", type=int, default=5)
+
+    contrastive_train_parser = subparsers.add_parser(
+        "train-contrastive",
+        help="Train a Contrastive VAE on target/background windows",
+    )
+    contrastive_train_parser.add_argument("--target-data", type=Path, required=True)
+    contrastive_train_parser.add_argument("--background-data", type=Path, required=True)
+    contrastive_train_parser.add_argument("--run-id", type=str, default=None)
+    contrastive_train_parser.add_argument(
+        "--latent-split",
+        type=str,
+        choices=["24_8", "20_12", "16_16", "12_20", "8_24"],
+        default=None,
+    )
+    contrastive_train_parser.add_argument("--shared-dim", type=int, default=16)
+    contrastive_train_parser.add_argument("--salient-dim", type=int, default=16)
+    contrastive_train_parser.add_argument("--epochs", type=int, default=10)
+    contrastive_train_parser.add_argument("--batch-size", type=int, default=64)
+    contrastive_train_parser.add_argument("--lr", type=float, default=1e-3)
+    contrastive_train_parser.add_argument("--beta-shared", type=float, default=1.0)
+    contrastive_train_parser.add_argument("--beta-salient", type=float, default=1.0)
+    contrastive_train_parser.add_argument("--salient-background-weight", type=float, default=1.0)
+    contrastive_train_parser.add_argument("--wandb", action="store_true")
+    contrastive_train_parser.add_argument("--eval-analysis-data", type=Path, default=None)
+    contrastive_train_parser.add_argument("--eval-attributes", type=Path, default=None)
+    contrastive_train_parser.add_argument("--eval-household-splits", type=Path, default=None)
+    contrastive_train_parser.add_argument(
+        "--eval-split-role",
+        type=str,
+        choices=["train", "validation", "eval", "all"],
+        default="eval",
+    )
+    contrastive_train_parser.add_argument(
+        "--eval-latent-mode",
+        type=str,
+        choices=["combined", "shared", "salient"],
+        default="salient",
+    )
+    contrastive_train_parser.add_argument(
+        "--eval-mig-method",
+        type=str,
+        choices=["sklearn", "binned"],
+        default="binned",
+    )
+    contrastive_train_parser.add_argument("--eval-mig-bins", type=int, default=32)
+    contrastive_train_parser.add_argument(
+        "--eval-mig-binning",
+        type=str,
+        choices=["quantile", "uniform"],
+        default="quantile",
+    )
+    contrastive_train_parser.add_argument(
+        "--eval-sap-method",
+        type=str,
+        choices=["sklearn", "vectorized"],
+        default="vectorized",
+    )
+    contrastive_train_parser.add_argument("--verbosity", type=int, default=1, choices=[0, 1, 2])
+
+    validation_report_parser = subparsers.add_parser(
+        "generate-validation-report",
+        help="Generate the validation research report",
+    )
+    validation_report_parser.add_argument("--campaign-results", type=Path, required=True)
+    validation_report_parser.add_argument("--campaign-diagnostics", type=Path, required=True)
+    validation_report_parser.add_argument("--latent-results", type=Path, required=True)
+    validation_report_parser.add_argument("--latent-metrics", type=Path, required=True)
+    validation_report_parser.add_argument("--output", type=Path, required=True)
+
     args = parser.parse_args()
     if args.command == "train":
         train_command(args)
@@ -301,6 +680,26 @@ def main() -> None:
         infer_command(args)
     elif args.command == "compare":
         compare_command(args)
+    elif args.command == "build-validation-data":
+        build_validation_data_command(args)
+    elif args.command == "build-household-splits":
+        build_household_splits_command(args)
+    elif args.command == "build-window-attributes":
+        build_window_attributes_command(args)
+    elif args.command == "build-contrastive-data":
+        build_contrastive_data_command(args)
+    elif args.command == "validate-campaigns":
+        validate_campaigns_command(args)
+    elif args.command == "analyze-campaign-sensitivity":
+        analyze_campaign_sensitivity_command(args)
+    elif args.command == "validate-latents":
+        validate_latents_command(args)
+    elif args.command == "build-campaign-latent-bridge":
+        build_campaign_latent_bridge_command(args)
+    elif args.command == "train-contrastive":
+        train_contrastive_command(args)
+    elif args.command == "generate-validation-report":
+        generate_validation_report_command(args)
 
 
 if __name__ == "__main__":

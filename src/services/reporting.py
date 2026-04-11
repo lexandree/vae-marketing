@@ -18,11 +18,11 @@ def generate_aggregate_report(
         profiles_df: DataFrame of baseline profiles.
         shifts_df: DataFrame of calculated shifts.
         transactions: Post-stimulus transactions.
-        model_type: The architecture used ('baseline' or 'beta_vae').
+        model_type: The architecture used ('baseline', 'beta_vae', or 'beta_tcvae').
 
     Returns:
         A dictionary containing the report metrics.
     """
-    if model_type == "beta_vae":
+    if model_type in {"beta_vae", "beta_tcvae"}:
         return generate_beta_report(profiles_df, shifts_df, transactions)
     return generate_baseline_report(profiles_df, shifts_df, transactions)
